@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Status = Literal["scraped", "chunked", "ai_tagged", "embedded"]
+Status = Literal["scraped", "chunked", "usability_classification", "ai_tagged", "embedded"]
 
 
 class EventScrapedContent(BaseModel):

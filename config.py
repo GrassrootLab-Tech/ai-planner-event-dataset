@@ -12,3 +12,5 @@ class Settings(BaseSettings):
     event_scraped_chunks_collection: str = "event_scraped_chunks"
     chunk_output_dir: str = "output/cleaned"
     chunk_min_chars: int = 100
+    openai_classification_model: str = "gpt-5.4-nano"
+    classification_max_concurrency: int = 5

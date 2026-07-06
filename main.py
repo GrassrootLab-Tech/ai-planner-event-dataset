@@ -4,13 +4,16 @@ import sys
 from pathlib import Path
 
 from clients.hasdata_client import HasDataClient
+from clients.openai_classifier_client import OpenAIClassifierClient
 from config import Settings
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from db.mongo import Mongo
+from services.chunk_classification_service import ChunkClassificationService
 from services.chunking_service import ChunkingService
 from services.event_scraper_service import EventScraperService
 from utils.logger import log_pretty, logger, setup_logging
+from utils.pipeline_status import PipelineSkip
 
 
 def _log_settings(settings: Settings) -> None:
@@ -20,6 +23,7 @@ def _log_settings(settings: Settings) -> None:
         "scraped_collection": settings.event_scraped_content_collection,
         "chunks_collection": settings.event_scraped_chunks_collection,
         "chunk_output_dir": settings.chunk_output_dir,
+        "classification_model": settings.openai_classification_model,
         "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
     })
 
@@ -76,6 +80,43 @@ async def run_chunk(page_url: str) -> int:
         await mongo.disconnect()
 
 
+async def run_classify(page_url: str) -> int:
+    settings = Settings()
+    _log_settings(settings)
+
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required for classification")
+
+    mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
+    await mongo.connect()
+
+    try:
+        content_repo = EventScrapedContentRepository(
+            mongo.db[settings.event_scraped_content_collection]
+        )
+        chunks_repo = EventScrapedChunksRepository(
+            mongo.db[settings.event_scraped_chunks_collection]
+        )
+        await content_repo.ensure_indexes()
+        await chunks_repo.ensure_indexes()
+
+        classifier = OpenAIClassifierClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_classification_model,
+        )
+        service = ChunkClassificationService(
+            content_repo,
+            chunks_repo,
+            classifier,
+            max_concurrency=settings.classification_max_concurrency,
+        )
+
+        logger.info("Starting classification for page_url=%s", page_url)
+        return await service.classify_and_store(page_url)
+    finally:
+        await mongo.disconnect()
+
+
 def main() -> None:
     setup_logging()
 
@@ -88,6 +129,12 @@ def main() -> None:
     chunk_parser = subparsers.add_parser("chunk", help="Chunk scraped markdown for a page")
     chunk_parser.add_argument("page_url", help="URL of the page to chunk")
 
+    classify_parser = subparsers.add_parser(
+        "classify",
+        help="Classify chunk usability for a page",
+    )
+    classify_parser.add_argument("page_url", help="URL of the page to classify")
+
     args = parser.parse_args()
 
     try:
@@ -97,6 +144,14 @@ def main() -> None:
         elif args.command == "chunk":
             chunk_count = asyncio.run(run_chunk(args.page_url))
             log_pretty("Chunking completed successfully", {"chunk_count": chunk_count})
+        elif args.command == "classify":
+            classified_count = asyncio.run(run_classify(args.page_url))
+            log_pretty("Classification completed successfully", {
+                "classified_count": classified_count,
+            })
+    except PipelineSkip as skip:
+        logger.warning("%s", skip.message)
+        print(skip.message)
     except Exception as exc:
         logger.exception("%s failed", args.command)
         print(f"Error: {exc}", file=sys.stderr)

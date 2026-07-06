@@ -8,6 +8,7 @@ from models.event_scraped_chunk import EventScrapedChunk
 from utils.logger import log_pretty, logger
 from utils.markdown_chunker import chunk_markdown
 from utils.markdown_cleaner import clean_markdown
+from utils.pipeline_status import check_step
 
 
 class ChunkingService:
@@ -26,16 +27,11 @@ class ChunkingService:
 
     async def chunk_and_store(self, page_url: str) -> int:
         doc = await self._content_repo.get_by_page_url(page_url)
-        if doc is None:
-            raise ValueError(f"No scraped content found for page_url={page_url}")
-
-        if doc.status != "scraped":
-            logger.info(
-                "Skipping chunking for page_url=%s (status=%s)",
-                page_url,
-                doc.status,
-            )
-            return 0
+        check_step(
+            status=doc.status if doc else None,
+            required="scraped",
+            step_name="chunking",
+        )
 
         cleaned = clean_markdown(doc.markdown)
         output_path = self._write_cleaned_markdown(page_url, cleaned)

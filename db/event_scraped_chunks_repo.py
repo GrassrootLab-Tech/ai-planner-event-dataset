@@ -1,6 +1,7 @@
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorCollection
 
-from models.event_scraped_chunk import EventScrapedChunk
+from models.event_scraped_chunk import EventScrapedChunk, IsUsable
 from utils.logger import log_pretty, logger
 
 
@@ -12,6 +13,20 @@ class EventScrapedChunksRepository:
         logger.info("Ensuring indexes on event_scraped_chunks collection")
         await self._collection.create_index([("page_url", 1), ("scraped_at", -1)])
         logger.info("Indexes ready")
+
+    async def list_by_page_url(self, page_url: str) -> list[tuple[str, EventScrapedChunk]]:
+        cursor = self._collection.find({"page_url": page_url})
+        results: list[tuple[str, EventScrapedChunk]] = []
+        async for doc in cursor:
+            chunk_id = str(doc.pop("_id"))
+            results.append((chunk_id, EventScrapedChunk.model_validate(doc)))
+        return results
+
+    async def update_is_usable(self, chunk_id: str, is_usable: IsUsable) -> None:
+        await self._collection.update_one(
+            {"_id": ObjectId(chunk_id)},
+            {"$set": {"is_usable": is_usable.model_dump()}},
+        )
 
     async def insert_many(self, docs: list[EventScrapedChunk]) -> list[str]:
         if not docs:
