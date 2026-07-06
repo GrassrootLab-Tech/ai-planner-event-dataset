@@ -10,14 +10,18 @@ from services.event_scraper_service import EventScraperService
 from utils.logger import log_pretty, logger, setup_logging
 
 
-async def run(page_url: str) -> str:
-    settings = Settings()
+def _log_settings(settings: Settings) -> None:
     log_pretty("Loaded settings", {
         "mongo_uri": settings.mongo_uri,
         "mongo_db_name": settings.mongo_db_name,
-        "collection": settings.event_scraped_content_collection,
+        "scraped_collection": settings.event_scraped_content_collection,
         "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
     })
+
+
+async def run_scrape(page_url: str) -> str:
+    settings = Settings()
+    _log_settings(settings)
 
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
@@ -40,15 +44,20 @@ async def run(page_url: str) -> str:
 def main() -> None:
     setup_logging()
 
-    parser = argparse.ArgumentParser(description="Scrape a page and store in MongoDB")
-    parser.add_argument("page_url", help="URL of the page to scrape")
+    parser = argparse.ArgumentParser(description="Scrape event pages and store in MongoDB")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    scrape_parser = subparsers.add_parser("scrape", help="Scrape a page and store in MongoDB")
+    scrape_parser.add_argument("page_url", help="URL of the page to scrape")
+
     args = parser.parse_args()
 
     try:
-        doc_id = asyncio.run(run(args.page_url))
-        log_pretty("Scrape completed successfully", {"inserted_id": doc_id})
+        if args.command == "scrape":
+            doc_id = asyncio.run(run_scrape(args.page_url))
+            log_pretty("Scrape completed successfully", {"inserted_id": doc_id})
     except Exception as exc:
-        logger.exception("Scrape failed")
+        logger.exception("%s failed", args.command)
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
