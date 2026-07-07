@@ -9,11 +9,6 @@ class EventScrapedChunksRepository:
     def __init__(self, collection: AsyncIOMotorCollection) -> None:
         self._collection = collection
 
-    async def ensure_indexes(self) -> None:
-        logger.info("Ensuring indexes on event_scraped_chunks collection")
-        await self._collection.create_index([("page_url", 1), ("scraped_at", -1)])
-        logger.info("Indexes ready")
-
     async def list_by_page_url(self, page_url: str) -> list[tuple[str, EventScrapedChunk]]:
         cursor = self._collection.find({"page_url": page_url}).sort("_id", 1)
         results: list[tuple[str, EventScrapedChunk]] = []
@@ -26,6 +21,12 @@ class EventScrapedChunksRepository:
         await self._collection.update_one(
             {"_id": ObjectId(chunk_id)},
             {"$set": {"is_usable": is_usable.model_dump()}},
+        )
+
+    async def update_metadata_tags(self, chunk_id: str, tags: dict) -> None:
+        await self._collection.update_one(
+            {"_id": ObjectId(chunk_id)},
+            {"$set": {"metadata_tags": tags}},
         )
 
     async def insert_many(self, docs: list[EventScrapedChunk]) -> list[str]:

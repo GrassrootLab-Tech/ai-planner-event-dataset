@@ -8,12 +8,6 @@ class EventScrapedContentRepository:
     def __init__(self, collection: AsyncIOMotorCollection) -> None:
         self._collection = collection
 
-    async def ensure_indexes(self) -> None:
-        logger.info("Ensuring indexes on event_scraped_content collection")
-        await self._collection.create_index([("page_url", 1), ("scraped_at", -1)])
-        await self._collection.create_index([("website", 1), ("scraped_at", -1)])
-        logger.info("Indexes ready")
-
     async def get_by_page_url(self, page_url: str) -> EventScrapedContent | None:
         doc = await self._collection.find_one({"page_url": page_url})
         if doc is None:

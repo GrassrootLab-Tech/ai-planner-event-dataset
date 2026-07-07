@@ -1,16 +1,41 @@
+import contextvars
 import logging
 import pprint
 from typing import Any
 
-logger = logging.getLogger("scraper")
+_log_stage = contextvars.ContextVar("log_stage", default="pipeline")
+
+logger = logging.getLogger("pipeline")
+
+COMMAND_LOG_STAGES: dict[str, str] = {
+    "scrape": "scraper",
+    "chunk": "chunker",
+    "classify": "usability",
+    "tag": "ai_tagging",
+}
+
+
+class _StageFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.stage = _log_stage.get()
+        return True
+
+
+def set_log_stage(stage: str) -> None:
+    _log_stage.set(stage)
 
 
 def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    handler = logging.StreamHandler()
+    handler.addFilter(_StageFilter())
+    handler.setFormatter(logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(stage)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    ))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
 
 
 def _truncate_value(value: Any, max_length: int) -> Any:
