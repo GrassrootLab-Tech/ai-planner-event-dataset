@@ -29,7 +29,7 @@ class OpenAIClassifierClient:
             "chunk_count": chunk_count,
         })
 
-        response = await self._client.beta.chat.completions.parse(
+        response = await self._client.chat.completions.parse(
             model=self._model,
             messages=[
                 {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},

@@ -4,3 +4,4 @@ venv
 .DS_Store
 __pycache__
 output/
+AI Planner Data Extraction tags*
