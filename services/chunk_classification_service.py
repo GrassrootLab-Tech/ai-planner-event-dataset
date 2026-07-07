@@ -1,9 +1,7 @@
-import asyncio
-
 from clients.openai_classifier_client import OpenAIClassifierClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
-from utils.logger import log_pretty, logger
+from utils.logger import log_pretty
 from utils.pipeline_status import check_step
 
 
@@ -13,13 +11,10 @@ class ChunkClassificationService:
         content_repo: EventScrapedContentRepository,
         chunks_repo: EventScrapedChunksRepository,
         classifier: OpenAIClassifierClient,
-        *,
-        max_concurrency: int = 5,
     ) -> None:
         self._content_repo = content_repo
         self._chunks_repo = chunks_repo
         self._classifier = classifier
-        self._max_concurrency = max_concurrency
 
     async def classify_and_store(self, page_url: str) -> int:
         doc = await self._content_repo.get_by_page_url(page_url)
@@ -33,19 +28,14 @@ class ChunkClassificationService:
         if not chunks:
             raise ValueError(f"No chunks found for page_url={page_url}")
 
-        semaphore = asyncio.Semaphore(self._max_concurrency)
+        chunk_inputs = [
+            (chunk_doc.chunk, chunk_doc.parent_section_heading)
+            for _, chunk_doc in chunks
+        ]
+        results = await self._classifier.classify_article(chunk_inputs)
 
-        async def classify_one(chunk_id: str, chunk_doc) -> None:
-            async with semaphore:
-                is_usable = await self._classifier.classify_chunk(
-                    chunk_doc.chunk,
-                    parent_section_heading=chunk_doc.parent_section_heading,
-                )
-                await self._chunks_repo.update_is_usable(chunk_id, is_usable)
-
-        await asyncio.gather(
-            *(classify_one(chunk_id, chunk_doc) for chunk_id, chunk_doc in chunks)
-        )
+        for (chunk_id, _), is_usable in zip(chunks, results):
+            await self._chunks_repo.update_is_usable(chunk_id, is_usable)
 
         await self._content_repo.update_status(page_url, "usability_classification")
 

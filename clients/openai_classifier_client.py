@@ -1,6 +1,6 @@
 from openai import AsyncOpenAI
 
-from models.chunk_classification import ChunkClassificationResult
+from models.chunk_classification import ArticleClassificationResult
 from models.event_scraped_chunk import IsUsable
 from prompts import load_prompt
 from utils.logger import log_pretty, logger
@@ -17,23 +17,16 @@ class OpenAIClassifierClient:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
 
-    async def classify_chunk(
+    async def classify_article(
         self,
-        chunk: str,
-        *,
-        parent_section_heading: str | None = None,
-    ) -> IsUsable:
-        user_content = chunk
-        if parent_section_heading:
-            user_content = (
-                f"Parent section heading: {parent_section_heading}\n\n"
-                f"Section content:\n{chunk}"
-            )
+        chunks: list[tuple[str, str | None]],
+    ) -> list[IsUsable]:
+        user_content = self._build_user_content(chunks)
+        chunk_count = len(chunks)
 
-        log_pretty("Classifying chunk", {
+        log_pretty("Classifying article", {
             "model": self._model,
-            "parent_section_heading": parent_section_heading,
-            "chunk_preview": chunk[:200],
+            "chunk_count": chunk_count,
         })
 
         response = await self._client.beta.chat.completions.parse(
@@ -42,20 +35,50 @@ class OpenAIClassifierClient:
                 {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            response_format=ChunkClassificationResult,
+            response_format=ArticleClassificationResult,
         )
 
         parsed = response.choices[0].message.parsed
         if parsed is None:
             raise ClassificationError("OpenAI returned no parsed classification result")
 
-        is_usable = IsUsable(
-            value=parsed.classification == "usable",
-            confidence=parsed.confidence,
-        )
+        return self._map_results(parsed, chunk_count)
+
+    @staticmethod
+    def _build_user_content(chunks: list[tuple[str, str | None]]) -> str:
+        parts = ["Classify each section below. Return one result per chunk_index.\n"]
+        for index, (chunk, parent_heading) in enumerate(chunks):
+            parts.append(f"--- chunk_index: {index} ---")
+            if parent_heading:
+                parts.append(f"parent_section_heading: {parent_heading}")
+            parts.append(chunk)
+            parts.append("")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _map_results(parsed: ArticleClassificationResult, chunk_count: int) -> list[IsUsable]:
+        if len(parsed.chunks) != chunk_count:
+            raise ClassificationError(
+                f"Expected {chunk_count} classifications, got {len(parsed.chunks)}"
+            )
+
+        by_index: dict[int, IsUsable] = {}
+        for item in parsed.chunks:
+            if item.chunk_index in by_index:
+                raise ClassificationError(f"Duplicate chunk_index: {item.chunk_index}")
+            by_index[item.chunk_index] = IsUsable(
+                value=item.classification == "usable",
+                confidence=item.confidence,
+            )
+
+        missing = [i for i in range(chunk_count) if i not in by_index]
+        if missing:
+            raise ClassificationError(f"Missing chunk_index values: {missing}")
+
+        results = [by_index[i] for i in range(chunk_count)]
         logger.info(
-            "Classification result: value=%s confidence=%.2f",
-            is_usable.value,
-            is_usable.confidence,
+            "Classification result: %d usable, %d not_usable",
+            sum(1 for r in results if r.value),
+            sum(1 for r in results if not r.value),
         )
-        return is_usable
+        return results

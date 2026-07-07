@@ -15,7 +15,7 @@ class EventScrapedChunksRepository:
         logger.info("Indexes ready")
 
     async def list_by_page_url(self, page_url: str) -> list[tuple[str, EventScrapedChunk]]:
-        cursor = self._collection.find({"page_url": page_url})
+        cursor = self._collection.find({"page_url": page_url}).sort("_id", 1)
         results: list[tuple[str, EventScrapedChunk]] = []
         async for doc in cursor:
             chunk_id = str(doc.pop("_id"))

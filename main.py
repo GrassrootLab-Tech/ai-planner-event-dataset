@@ -108,7 +108,6 @@ async def run_classify(page_url: str) -> int:
             content_repo,
             chunks_repo,
             classifier,
-            max_concurrency=settings.classification_max_concurrency,
         )
 
         logger.info("Starting classification for page_url=%s", page_url)
