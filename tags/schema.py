@@ -1,26 +1,27 @@
-from typing import Any, Literal
+from typing import Annotated, Any
+
+from pydantic import BeforeValidator
 
 from tags.spec import TagDefinition
 
 TagValue = str | list[str] | bool | dict[str, list[str]]
 
 
-def _literal_type(values: tuple[str, ...]) -> Any:
-    if not values:
-        return str
-    return Literal.__getitem__(values)
+def _as_list(value: Any) -> Any:
+    if isinstance(value, str):
+        return [value]
+    return value
 
 
 def field_type_for_tag(tag: TagDefinition) -> Any:
+    """Simple types for tool input_schema; multi tags coerce str → list."""
     if tag.name == "licensed_ip_flag":
-        return list[str]
+        return Annotated[list[str], BeforeValidator(_as_list)]
 
     match tag.value_type:
         case "bool":
             return bool
-        case "text":
+        case "text" | "single":
             return str
         case "multi":
-            return list[_literal_type(tag.values)]
-        case "single":
-            return _literal_type(tag.values)
+            return Annotated[list[str], BeforeValidator(_as_list)]

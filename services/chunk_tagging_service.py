@@ -1,12 +1,10 @@
 import asyncio
 
-from clients.openai_tagging_client import OpenAITaggingClient
+from clients.anthropic_tagging_client import AnthropicTaggingClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
-from tags.groups import TAG_GROUPS
 from tags.order import order_metadata_tags
 from tags.registry import TagRegistry
-from tags.schema import TagValue
 from utils.logger import log_pretty, logger
 from utils.pipeline_status import check_step
 
@@ -16,7 +14,7 @@ class ChunkTaggingService:
         self,
         content_repo: EventScrapedContentRepository,
         chunks_repo: EventScrapedChunksRepository,
-        tagger: OpenAITaggingClient,
+        tagger: AnthropicTaggingClient,
         registry: TagRegistry | None = None,
     ) -> None:
         self._content_repo = content_repo
@@ -48,33 +46,15 @@ class ChunkTaggingService:
             (chunk_doc.chunk, chunk_doc.parent_section_heading)
             for _, chunk_doc in usable_chunks
         ]
-
-        merged_tags: list[dict[str, TagValue]] = [
-            {} for _ in usable_chunks
-        ]
-
-        async def tag_group(
-            group_id: str,
-            tag_names: list[str],
-        ) -> list[dict[str, TagValue]]:
-            tag_defs = self._registry.get_many(tag_names)
-            return await self._tagger.classify_group(group_id, tag_defs, chunk_inputs)
-
-        group_results = await asyncio.gather(*[
-            tag_group(group_id, tag_names)
-            for group_id, tag_names in TAG_GROUPS.items()
-        ])
-
-        for group_tags_per_chunk in group_results:
-            for index, group_tags in enumerate(group_tags_per_chunk):
-                merged_tags[index] = {**merged_tags[index], **group_tags}
+        tag_defs = self._registry.all_tags()
+        results = await self._tagger.classify_article(tag_defs, chunk_inputs)
 
         await asyncio.gather(*[
             self._chunks_repo.update_metadata_tags(
                 chunk_id,
                 order_metadata_tags(tags),
             )
-            for (chunk_id, _), tags in zip(usable_chunks, merged_tags)
+            for (chunk_id, _), tags in zip(usable_chunks, results)
         ])
 
         await self._content_repo.update_status(page_url, "ai_tagged")
@@ -82,6 +62,6 @@ class ChunkTaggingService:
         log_pretty("Tagging completed", {
             "page_url": page_url,
             "usable_chunk_count": len(usable_chunks),
-            "group_count": len(TAG_GROUPS),
+            "tag_count": len(tag_defs),
         })
         return len(usable_chunks)

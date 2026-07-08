@@ -1,5 +1,5 @@
 from tags.definitions import TAGS
-from tags.groups import TAG_GROUPS
+from tags.order import METADATA_TAG_ORDER
 from tags.spec import TagDefinition, TagSpec
 
 
@@ -10,7 +10,6 @@ class TagRegistry:
             name: TagDefinition(name=name, **spec.__dict__)
             for name, spec in source.items()
         }
-        self._validate_groups()
 
     def get(self, name: str) -> TagDefinition:
         if name not in self._tags:
@@ -20,10 +19,8 @@ class TagRegistry:
     def get_many(self, names: list[str]) -> list[TagDefinition]:
         return [self.get(name) for name in names]
 
-    def _validate_groups(self) -> None:
-        for group_id, tag_names in TAG_GROUPS.items():
-            for tag_name in tag_names:
-                if tag_name not in self._tags:
-                    raise ValueError(
-                        f"Tag '{tag_name}' in group '{group_id}' not found in registry"
-                    )
+    def all_tags(self) -> list[TagDefinition]:
+        ordered = [self.get(name) for name in METADATA_TAG_ORDER if name in self._tags]
+        ordered_names = {tag.name for tag in ordered}
+        extras = [tag for name, tag in self._tags.items() if name not in ordered_names]
+        return ordered + extras

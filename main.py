@@ -3,9 +3,9 @@ import asyncio
 import sys
 from pathlib import Path
 
+from clients.anthropic_tagging_client import AnthropicTaggingClient
 from clients.hasdata_client import HasDataClient
 from clients.openai_classifier_client import OpenAIClassifierClient
-from clients.openai_tagging_client import OpenAITaggingClient
 from config import Settings
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
@@ -26,7 +26,7 @@ def _log_settings(settings: Settings) -> None:
         "chunks_collection": settings.event_scraped_chunks_collection,
         "chunk_output_dir": settings.chunk_output_dir,
         "classification_model": settings.openai_classification_model,
-        "tagging_model": settings.openai_tagging_model,
+        "tagging_model": settings.anthropic_tagging_model,
         "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
     })
 
@@ -122,8 +122,8 @@ async def run_tag(page_url: str) -> int:
     settings = Settings()
     _log_settings(settings)
 
-    if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY is required for tagging")
+    if not settings.anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY is required for tagging")
 
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
@@ -136,9 +136,9 @@ async def run_tag(page_url: str) -> int:
             mongo.db[settings.event_scraped_chunks_collection]
         )
 
-        tagger = OpenAITaggingClient(
-            api_key=settings.openai_api_key,
-            model=settings.openai_tagging_model,
+        tagger = AnthropicTaggingClient(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_tagging_model,
         )
         service = ChunkTaggingService(
             content_repo,
