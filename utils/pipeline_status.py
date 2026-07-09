@@ -8,6 +8,8 @@ STATUS_ORDER: list[Status] = [
     "embedded",
 ]
 
+PIPELINE_STEP_NAMES: list[str] = ["scrape", "chunk", "classify", "tag", "embed"]
+
 
 class PipelineSkip(Exception):
     def __init__(self, reason: str, message: str) -> None:
@@ -48,3 +50,42 @@ def check_step(*, status: Status | None, required: Status, step_name: str) -> No
         "not_ready",
         f"Not yet ready for {step_name}: status is '{status}', expected '{required}'",
     )
+
+
+def steps_to_run(*, exists: bool, status: Status | None) -> list[str]:
+    if not exists:
+        return list(PIPELINE_STEP_NAMES)
+
+    current_status = status or "scraped"
+    status_index = _status_index(current_status)
+    steps: list[str] = []
+
+    if status_index < _status_index("chunked"):
+        steps.append("chunk")
+    if status_index < _status_index("usability_classification"):
+        steps.append("classify")
+    if status_index < _status_index("ai_tagged"):
+        steps.append("tag")
+    if status_index < _status_index("embedded"):
+        steps.append("embed")
+
+    return steps
+
+
+def skip_message_for_step(
+    step: str,
+    *,
+    exists: bool,
+    status: Status | None,
+    page_url: str,
+) -> str:
+    if step == "scrape":
+        return f"Already scraped: page_url={page_url} (status={status})"
+
+    step_labels = {
+        "chunk": "chunking",
+        "classify": "classification",
+        "tag": "tagging",
+        "embed": "embedding",
+    }
+    return f"Already done for {step_labels[step]}: status is '{status}'"

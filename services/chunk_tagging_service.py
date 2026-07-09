@@ -22,13 +22,14 @@ class ChunkTaggingService:
         self._tagger = tagger
         self._registry = registry or TagRegistry()
 
-    async def tag_and_store(self, page_url: str) -> int:
-        doc = await self._content_repo.get_by_page_url(page_url)
-        check_step(
-            status=doc.status if doc else None,
-            required="usability_classification",
-            step_name="tagging",
-        )
+    async def tag_and_store(self, page_url: str, *, skip_status_check: bool = False) -> int:
+        if not skip_status_check:
+            doc = await self._content_repo.get_by_page_url(page_url)
+            check_step(
+                status=doc.status if doc else None,
+                required="usability_classification",
+                step_name="tagging",
+            )
 
         chunks = await self._chunks_repo.list_by_page_url(page_url)
         usable_chunks = [

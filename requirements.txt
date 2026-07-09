@@ -4,3 +4,4 @@ pydantic-settings==2.14.2
 python-dotenv==1.2.2
 openai==2.44.0
 anthropic==0.116.0
+pinecone==9.1.0

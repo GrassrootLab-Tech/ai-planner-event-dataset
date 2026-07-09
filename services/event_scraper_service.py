@@ -3,7 +3,7 @@ from db.event_scraped_content_repo import EventScrapedContentRepository
 from models.event_scraped_content import EventScrapedContent
 from utils.logger import log_pretty, logger
 from utils.pipeline_status import check_scrape
-from utils.url import extract_website
+from utils.url import extract_website, strip_trailing_slash
 
 
 class EventScraperService:
@@ -15,13 +15,16 @@ class EventScraperService:
         self._hasdata = hasdata
         self._repo = repo
 
-    async def scrape_and_store(self, page_url: str) -> str:
-        existing = await self._repo.get_by_page_url(page_url)
-        check_scrape(
-            exists=existing is not None,
-            status=existing.status if existing else None,
-            page_url=page_url,
-        )
+    async def scrape_and_store(self, page_url: str, *, skip_status_check: bool = False) -> str:
+        page_url = strip_trailing_slash(page_url)
+
+        if not skip_status_check:
+            existing = await self._repo.get_by_page_url(page_url)
+            check_scrape(
+                exists=existing is not None,
+                status=existing.status if existing else None,
+                page_url=page_url,
+            )
 
         website = extract_website(page_url)
         log_pretty("Prepared scrape job", {

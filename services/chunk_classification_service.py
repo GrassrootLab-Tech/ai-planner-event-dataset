@@ -16,13 +16,14 @@ class ChunkClassificationService:
         self._chunks_repo = chunks_repo
         self._classifier = classifier
 
-    async def classify_and_store(self, page_url: str) -> int:
-        doc = await self._content_repo.get_by_page_url(page_url)
-        check_step(
-            status=doc.status if doc else None,
-            required="chunked",
-            step_name="classification",
-        )
+    async def classify_and_store(self, page_url: str, *, skip_status_check: bool = False) -> int:
+        if not skip_status_check:
+            doc = await self._content_repo.get_by_page_url(page_url)
+            check_step(
+                status=doc.status if doc else None,
+                required="chunked",
+                step_name="classification",
+            )
 
         chunks = await self._chunks_repo.list_by_page_url(page_url)
         if not chunks:

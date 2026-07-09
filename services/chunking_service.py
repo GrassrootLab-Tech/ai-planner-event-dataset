@@ -25,13 +25,17 @@ class ChunkingService:
         self._output_dir = output_dir
         self._min_chars = min_chars
 
-    async def chunk_and_store(self, page_url: str) -> int:
+    async def chunk_and_store(self, page_url: str, *, skip_status_check: bool = False) -> int:
         doc = await self._content_repo.get_by_page_url(page_url)
-        check_step(
-            status=doc.status if doc else None,
-            required="scraped",
-            step_name="chunking",
-        )
+        if not skip_status_check:
+            check_step(
+                status=doc.status if doc else None,
+                required="scraped",
+                step_name="chunking",
+            )
+
+        if doc is None:
+            raise ValueError(f"No scraped content found for page_url={page_url}")
 
         cleaned = clean_markdown(doc.markdown)
         output_path = self._write_cleaned_markdown(page_url, cleaned)

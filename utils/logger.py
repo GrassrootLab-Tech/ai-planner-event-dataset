@@ -12,6 +12,7 @@ COMMAND_LOG_STAGES: dict[str, str] = {
     "chunk": "chunker",
     "classify": "usability",
     "tag": "ai_tagging",
+    "embed": "embedding",
 }
 
 

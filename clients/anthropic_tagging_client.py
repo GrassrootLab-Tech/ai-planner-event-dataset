@@ -8,7 +8,7 @@ from tags.spec import TagDefinition
 from utils.logger import log_pretty, logger
 
 TOOL_NAME = "submit_tags"
-MAX_TOKENS = 21_000
+MAX_TOKENS = 32_000
 
 
 class TaggingError(Exception):
@@ -43,7 +43,7 @@ class AnthropicTaggingClient:
             },
         )
 
-        response = await self._client.messages.create(
+        async with self._client.messages.stream(
             model=self._model,
             max_tokens=MAX_TOKENS,
             system=system_prompt,
@@ -62,7 +62,8 @@ class AnthropicTaggingClient:
                 },
             ],
             tool_choice={"type": "tool", "name": TOOL_NAME},
-        )
+        ) as stream:
+            response = await stream.get_final_message()
 
         usage = getattr(response, "usage", None)
         log_pretty(

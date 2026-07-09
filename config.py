@@ -14,4 +14,7 @@ class Settings(BaseSettings):
     chunk_output_dir: str = "output/cleaned"
     chunk_min_chars: int = 100
     openai_classification_model: str = "gpt-5.4-nano"
+    openai_embedding_model: str = "text-embedding-3-small"
     anthropic_tagging_model: str = "claude-sonnet-4-5"
+    pinecone_api_key: str | None = None
+    pinecone_index_name: str = "ai-planner-dataset"
