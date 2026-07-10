@@ -22,6 +22,7 @@ from services.chunk_embedding_service import ChunkEmbeddingService
 from services.chunk_tagging_service import ChunkTaggingService
 from services.chunking_service import ChunkingService
 from services.event_scraper_service import EventScraperService
+from retrieval import populate_tag_index
 from utils.logger import COMMAND_LOG_STAGES, log_pretty, logger, set_log_stage, setup_logging
 from utils.pipeline_status import (
     PIPELINE_STEP_NAMES,
@@ -44,6 +45,7 @@ def _log_settings(settings: Settings) -> None:
         "embedding_model": settings.openai_embedding_model,
         "tagging_model": settings.anthropic_tagging_model,
         "pinecone_index": settings.pinecone_index_name,
+        "pinecone_tags_index": settings.pinecone_tags_index_name,
         "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
     })
 
@@ -209,6 +211,28 @@ async def run_embed(page_url: str) -> int:
         return await service.embed_and_store(page_url)
     finally:
         await mongo.disconnect()
+
+
+async def run_populate_tags() -> int:
+    settings = Settings()
+    _log_settings(settings)
+
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required for tag index population")
+    if not settings.pinecone_api_key:
+        raise ValueError("PINECONE_API_KEY is required for tag index population")
+
+    embedder = OpenAIEmbeddingClient(
+        api_key=settings.openai_api_key,
+        model=settings.openai_embedding_model,
+    )
+    tags_pinecone = PineconeClient(
+        api_key=settings.pinecone_api_key,
+        index_name=settings.pinecone_tags_index_name,
+    )
+
+    logger.info("Starting tag index population for index=%s", settings.pinecone_tags_index_name)
+    return await populate_tag_index(embedder, tags_pinecone)
 
 
 @dataclass
@@ -545,6 +569,11 @@ def main() -> None:
         help="Run full pipeline for every URL in sample_website.py",
     )
 
+    subparsers.add_parser(
+        "populate-tags",
+        help="Embed and upsert all tag values into the Pinecone tags index",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -581,6 +610,9 @@ def main() -> None:
             })
             if failed_count:
                 sys.exit(1)
+        elif args.command == "populate-tags":
+            vector_count = asyncio.run(run_populate_tags())
+            log_pretty("Tag index population completed", {"vector_count": vector_count})
     except PipelineSkip as skip:
         set_log_stage(COMMAND_LOG_STAGES.get(args.command, "pipeline"))
         logger.warning("%s", skip.message)

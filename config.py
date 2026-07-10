@@ -16,5 +16,7 @@ class Settings(BaseSettings):
     openai_classification_model: str = "gpt-5.4-nano"
     openai_embedding_model: str = "text-embedding-3-small"
     anthropic_tagging_model: str = "claude-sonnet-4-5"
+    anthropic_query_tagging_model: str = "claude-haiku-4-5"
     pinecone_api_key: str | None = None
     pinecone_index_name: str = "ai-planner-dataset"
+    pinecone_tags_index_name: str = "ai-planner-tags"
