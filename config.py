@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     hasdata_api_key: str
     serpapi_api_key: str | None = None
+    reddit_client_id: str | None = None
+    reddit_client_secret: str | None = None
+    reddit_user_agent: str = "ai-planner-dataset-experiment/0.1 by partyhub"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     mongo_uri: str = "mongodb://localhost:27017"

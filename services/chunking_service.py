@@ -1,12 +1,14 @@
 import hashlib
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from models.event_scraped_chunk import EventScrapedChunk
+from reddit import chunk_reddit_thread, from_storage_dict, is_reddit_post_url
 from utils.logger import log_pretty, logger
-from utils.markdown_chunker import chunk_markdown
+from utils.markdown_chunker import ChunkResult, chunk_markdown
 from utils.markdown_cleaner import clean_markdown
 from utils.pipeline_status import check_step
 
@@ -37,10 +39,19 @@ class ChunkingService:
         if doc is None:
             raise ValueError(f"No scraped content found for page_url={page_url}")
 
-        cleaned = clean_markdown(doc.markdown)
-        output_path = self._write_cleaned_markdown(page_url, cleaned)
+        cleaned_markdown_path: str | None = None
 
-        chunk_results = chunk_markdown(cleaned, min_chars=self._min_chars)
+        if is_reddit_post_url(page_url):
+            if not doc.reddit_data:
+                raise ValueError(f"No reddit_data found for page_url={page_url}")
+            chunk_results = self._chunk_reddit(doc.reddit_data)
+        else:
+            if not doc.markdown:
+                raise ValueError(f"No markdown found for page_url={page_url}")
+            cleaned = clean_markdown(doc.markdown)
+            chunk_results = chunk_markdown(cleaned, min_chars=self._min_chars)
+            cleaned_markdown_path = str(self._write_cleaned_markdown(page_url, cleaned))
+
         chunk_docs = [
             EventScrapedChunk(
                 page_url=page_url,
@@ -57,9 +68,14 @@ class ChunkingService:
         log_pretty("Chunking completed", {
             "page_url": page_url,
             "chunk_count": len(chunk_docs),
-            "cleaned_markdown_path": str(output_path),
+            "cleaned_markdown_path": cleaned_markdown_path,
         })
         return len(chunk_docs)
+
+    @staticmethod
+    def _chunk_reddit(reddit_data: dict[str, Any]) -> list[ChunkResult]:
+        thread = from_storage_dict(reddit_data)
+        return chunk_reddit_thread(thread)
 
     def _write_cleaned_markdown(self, page_url: str, cleaned: str) -> Path:
         self._output_dir.mkdir(parents=True, exist_ok=True)

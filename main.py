@@ -17,6 +17,7 @@ from config import Settings
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from db.mongo import Mongo
+from reddit import RedditClient
 from services.chunk_classification_service import ChunkClassificationService
 from services.chunk_embedding_service import ChunkEmbeddingService
 from services.chunk_tagging_service import ChunkTaggingService
@@ -30,6 +31,16 @@ from utils.pipeline_status import (
     skip_message_for_step,
     steps_to_run,
 )
+
+
+def _build_reddit_client(settings: Settings) -> RedditClient | None:
+    if not settings.reddit_client_id or not settings.reddit_client_secret:
+        return None
+    return RedditClient(
+        client_id=settings.reddit_client_id,
+        client_secret=settings.reddit_client_secret,
+        user_agent=settings.reddit_user_agent,
+    )
 
 BATCH_REPORT_PATH = Path("output/batch_report.txt")
 
@@ -64,7 +75,7 @@ async def run_scrape(page_url: str) -> str:
         )
 
         hasdata = HasDataClient(api_key=settings.hasdata_api_key)
-        service = EventScraperService(hasdata, repo)
+        service = EventScraperService(hasdata, repo, reddit=_build_reddit_client(settings))
 
         logger.info("Starting scrape for page_url=%s", page_url)
         return await service.scrape_and_store(page_url)
@@ -270,6 +281,7 @@ class PipelineContext:
             scraper=EventScraperService(
                 HasDataClient(api_key=settings.hasdata_api_key),
                 content_repo,
+                reddit=_build_reddit_client(settings),
             ),
             chunker=ChunkingService(
                 content_repo,
