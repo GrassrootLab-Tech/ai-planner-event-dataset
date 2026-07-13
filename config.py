@@ -2,9 +2,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     hasdata_api_key: str
+    serpapi_api_key: str | None = None
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     mongo_uri: str = "mongodb://localhost:27017"

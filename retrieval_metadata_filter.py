@@ -52,14 +52,9 @@ def _build_system_prompt(tags: list[TagDefinition]) -> str:
         "You extract party-planning metadata tags from a user search query.",
         "Use only the allowed tag names and values listed below.",
         "For bool tags use true/false. For other tags return a list of allowed values.",
-        "",
-        "must_have: only hard constraints clearly stated in the query. Keep this small and precise.",
+        "must_have: only hard constraints clearly stated in the query. Keep this small and precise. Don't use more than three tags in must_have.",  # loosen this as data grows
         "good_to_have: be extensive. Infer many soft preferences that would improve retrieval recall.",
-        "Include related themes, aesthetics, activities, decor, food, guest mix, season, effort,",
-        "budget signals, and other relevant tags even when only lightly implied.",
-        "Prefer a rich good_to_have set over a sparse one. Still use only allowed values — do not invent tags.",
-        "Omit a tag only when it has no reasonable connection to the query.",
-        "",
+        "Prefer a rich good_to_have set over a sparse one still maintaining relevancy to the query. Still use only allowed values — do not invent tags.",
         "Allowed tags:",
     ]
     for tag in tags:

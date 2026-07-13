@@ -10,7 +10,7 @@ own genuine suggestions — never mention sources, documents, or how you know
 things. Keep it conversational, simple, and personal, like advice from a 
 friend who loves helping people plan memorable events."""
 
-INSTRUCTIONS = "Respond conversationally in a friendly and engaging tone, as if giving personalized advice. Don't mention the sources in your answer. Keep it simple and easy to understand."
+INSTRUCTIONS = "Respond conversationally in a friendly and engaging tone, as if giving personalized advice. Don't mention the sources in your answer. Don't ask questions in your answer. Keep it simple and easy to understand."
 
 MAX_TOKENS = 4096
 
