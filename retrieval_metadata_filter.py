@@ -291,7 +291,8 @@ class MetadataFilterRetriever:
             tag_registry=self._tag_registry,
         )
         pinecone_filter = build_pinecone_filter(inference)
-        query_vector = (await self._embedder.embed_texts([query]))[0]
+        query_vector, _ = await self._embedder.embed_texts([query])
+        query_vector = query_vector[0]
         matches = self._chunk_index.query(
             query_vector,
             top_k=top_k,

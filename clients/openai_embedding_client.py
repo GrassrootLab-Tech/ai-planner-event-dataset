@@ -1,6 +1,7 @@
 from openai import AsyncOpenAI
 
 from utils.logger import log_pretty, logger
+from utils.pipeline_cost import TokenUsage
 
 
 class OpenAIEmbeddingClient:
@@ -12,9 +13,9 @@ class OpenAIEmbeddingClient:
     def model(self) -> str:
         return self._model
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(self, texts: list[str]) -> tuple[list[list[float]], TokenUsage]:
         if not texts:
-            return []
+            return [], TokenUsage()
 
         log_pretty("Embedding texts", {
             "model": self._model,
@@ -27,5 +28,9 @@ class OpenAIEmbeddingClient:
         )
 
         embeddings = [item.embedding for item in response.data]
+        usage = TokenUsage.from_openai_embedding(response.usage)
+        log_pretty("OpenAI embedding token usage", {
+            "input_tokens": usage.input_tokens,
+        })
         logger.info("Generated %d embeddings", len(embeddings))
-        return embeddings
+        return embeddings, usage

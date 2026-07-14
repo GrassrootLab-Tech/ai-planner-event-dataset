@@ -2,6 +2,7 @@ from clients.openai_classifier_client import OpenAIClassifierClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from utils.logger import log_pretty
+from utils.pipeline_cost import usd_for_model
 from utils.pipeline_status import check_step
 
 
@@ -16,7 +17,12 @@ class ChunkClassificationService:
         self._chunks_repo = chunks_repo
         self._classifier = classifier
 
-    async def classify_and_store(self, page_url: str, *, skip_status_check: bool = False) -> int:
+    async def classify_and_store(
+        self,
+        page_url: str,
+        *,
+        skip_status_check: bool = False,
+    ) -> tuple[int, dict[str, float]]:
         if not skip_status_check:
             doc = await self._content_repo.get_by_page_url(page_url)
             check_step(
@@ -33,7 +39,7 @@ class ChunkClassificationService:
             (chunk_doc.chunk, chunk_doc.parent_section_heading)
             for _, chunk_doc in chunks
         ]
-        results = await self._classifier.classify_article(chunk_inputs)
+        results, usage = await self._classifier.classify_article(chunk_inputs)
 
         for (chunk_id, _), is_usable in zip(chunks, results):
             await self._chunks_repo.update_is_usable(chunk_id, is_usable)
@@ -44,4 +50,6 @@ class ChunkClassificationService:
             "page_url": page_url,
             "chunk_count": len(chunks),
         })
-        return len(chunks)
+        return len(chunks), {
+            "gpt_classify_usd": usd_for_model(self._classifier.model, usage),
+        }

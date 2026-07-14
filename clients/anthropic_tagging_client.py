@@ -6,6 +6,7 @@ from tags.prompt_builder import build_system_prompt
 from tags.schema import TagValue
 from tags.spec import TagDefinition
 from utils.logger import log_pretty, logger
+from utils.pipeline_cost import TokenUsage
 
 TOOL_NAME = "submit_tags"
 MAX_TOKENS = 32_000
@@ -20,13 +21,17 @@ class AnthropicTaggingClient:
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     async def classify_article(
         self,
         tags: list[TagDefinition],
         chunks: list[tuple[str, str | None]],
-    ) -> list[dict[str, TagValue]]:
+    ) -> tuple[list[dict[str, TagValue]], TokenUsage]:
         if not chunks:
-            return []
+            return [], TokenUsage()
 
         system_prompt = build_system_prompt(tags)
         user_content = self._build_user_content(chunks)
@@ -65,19 +70,19 @@ class AnthropicTaggingClient:
         ) as stream:
             response = await stream.get_final_message()
 
-        usage = getattr(response, "usage", None)
+        usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
         log_pretty(
             "Anthropic token usage",
             {
-                "input_tokens": getattr(usage, "input_tokens", None),
-                "output_tokens": getattr(usage, "output_tokens", None),
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
                 "max_tokens": MAX_TOKENS,
             },
         )
 
         tool_input = self._extract_tool_input(response)
         parsed = response_model.model_validate(tool_input)
-        return self._map_results(parsed, chunk_count, tag_names)
+        return self._map_results(parsed, chunk_count, tag_names), usage
 
     @staticmethod
     def _build_user_content(chunks: list[tuple[str, str | None]]) -> str:

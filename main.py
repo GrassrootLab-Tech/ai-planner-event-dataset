@@ -27,6 +27,11 @@ from services.chunking_service import ChunkingService
 from services.event_scraper_service import EventScraperService
 from retrieval import populate_tag_index
 from utils.logger import COMMAND_LOG_STAGES, log_pretty, logger, set_log_stage, setup_logging
+from utils.pipeline_cost import (
+    article_cost_from_steps,
+    cost_report_path_for_run,
+    write_cost_report,
+)
 from utils.pipeline_status import (
     PIPELINE_STEP_NAMES,
     PipelineSkip,
@@ -80,7 +85,8 @@ async def run_scrape(page_url: str) -> str:
         service = EventScraperService(hasdata, repo, reddit=_build_reddit_client(settings))
 
         logger.info("Starting scrape for page_url=%s", page_url)
-        return await service.scrape_and_store(page_url)
+        doc_id, _ = await service.scrape_and_store(page_url)
+        return doc_id
     finally:
         await mongo.disconnect()
 
@@ -143,7 +149,8 @@ async def run_classify(page_url: str) -> int:
         )
 
         logger.info("Starting classification for page_url=%s", page_url)
-        return await service.classify_and_store(page_url)
+        classified_count, _ = await service.classify_and_store(page_url)
+        return classified_count
     finally:
         await mongo.disconnect()
 
@@ -178,7 +185,8 @@ async def run_tag(page_url: str) -> int:
         )
 
         logger.info("Starting tagging for page_url=%s", page_url)
-        return await service.tag_and_store(page_url)
+        tagged_count, _ = await service.tag_and_store(page_url)
+        return tagged_count
     finally:
         await mongo.disconnect()
 
@@ -213,7 +221,8 @@ async def run_anonymize(page_url: str) -> int:
         )
 
         logger.info("Starting anonymization for page_url=%s", page_url)
-        return await service.anonymize_and_store(page_url)
+        anonymized_count, _ = await service.anonymize_and_store(page_url)
+        return anonymized_count
     finally:
         await mongo.disconnect()
 
@@ -255,7 +264,8 @@ async def run_embed(page_url: str) -> int:
         )
 
         logger.info("Starting embedding for page_url=%s", page_url)
-        return await service.embed_and_store(page_url)
+        embedded_count, _ = await service.embed_and_store(page_url)
+        return embedded_count
     finally:
         await mongo.disconnect()
 
@@ -371,7 +381,7 @@ async def _execute_pipeline_step(
     ctx: PipelineContext,
     step_name: str,
     page_url: str,
-) -> Any:
+) -> tuple[Any, dict[str, Any]]:
     if step_name == "scrape":
         set_log_stage(COMMAND_LOG_STAGES["scrape"])
         logger.info("Starting scrape for page_url=%s", page_url)
@@ -380,7 +390,8 @@ async def _execute_pipeline_step(
     if step_name == "chunk":
         set_log_stage(COMMAND_LOG_STAGES["chunk"])
         logger.info("Starting chunking for page_url=%s", page_url)
-        return await ctx.chunker.chunk_and_store(page_url, skip_status_check=True)
+        count = await ctx.chunker.chunk_and_store(page_url, skip_status_check=True)
+        return count, {}
 
     if step_name == "classify":
         if not ctx.settings.openai_api_key:
@@ -426,11 +437,13 @@ def _step_outcome(
     *,
     message: str | None = None,
     result: Any = None,
+    cost: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "status": status,
         "message": message,
         "result": result,
+        "cost": cost or {},
     }
 
 
@@ -471,8 +484,8 @@ async def run_pipeline_report(
 
         for index, step_name in enumerate(steps_to_execute):
             try:
-                result = await _execute_pipeline_step(ctx, step_name, page_url)
-                steps[step_name] = _step_outcome("ok", result=result)
+                result, cost = await _execute_pipeline_step(ctx, step_name, page_url)
+                steps[step_name] = _step_outcome("ok", result=result, cost=cost)
             except PipelineSkip as skip:
                 failed_at = step_name
                 error = skip.message
@@ -492,6 +505,7 @@ async def run_pipeline_report(
                 break
 
         pipeline_status = "completed" if failed_at is None else "failed"
+        cost = article_cost_from_steps(page_url, steps)
         report = {
             "page_url": page_url,
             "status": pipeline_status,
@@ -499,6 +513,7 @@ async def run_pipeline_report(
             "failed_at": failed_at,
             "error": error,
             "error_exception": error_exception,
+            "cost": cost,
         }
         if pipeline_status == "completed":
             log_pretty("Pipeline completed", {
@@ -572,14 +587,16 @@ def write_batch_report(results: list[dict[str, Any]], started_at: str) -> Path:
     return BATCH_REPORT_PATH
 
 
-async def run_all_sample() -> tuple[list[dict[str, Any]], Path]:
+async def run_all_sample() -> tuple[list[dict[str, Any]], Path, Path]:
     from sample_website import PAGE_URLS
 
     page_urls = [url.strip() for url in PAGE_URLS if url and url.strip()]
     if not page_urls:
         raise ValueError("No URLs in sample_website.PAGE_URLS")
 
-    started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    started_at_dt = datetime.now(timezone.utc)
+    started_at = started_at_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    cost_path = cost_report_path_for_run(started_at_dt)
     results: list[dict[str, Any]] = []
 
     ctx = await PipelineContext.create()
@@ -588,11 +605,13 @@ async def run_all_sample() -> tuple[list[dict[str, Any]], Path]:
             logger.info("Processing sample URL %d/%d", index, len(page_urls))
             results.append(await run_pipeline_report(page_url, ctx))
             write_batch_report(results, started_at)
+            write_cost_report([report["cost"] for report in results], cost_path)
     finally:
         await ctx.close()
 
     report_path = write_batch_report(results, started_at)
-    return results, report_path
+    write_cost_report([report["cost"] for report in results], cost_path)
+    return results, report_path, cost_path
 
 
 def main() -> None:
@@ -679,12 +698,13 @@ def main() -> None:
         elif args.command == "run-all":
             asyncio.run(run_all(args.page_url))
         elif args.command == "run-all-sample":
-            results, report_path = asyncio.run(run_all_sample())
+            results, report_path, cost_path = asyncio.run(run_all_sample())
             failed_count = sum(1 for report in results if report["status"] == "failed")
             log_pretty("Sample batch completed", {
                 "url_count": len(results),
                 "failed_count": failed_count,
                 "report_path": str(report_path),
+                "cost_path": str(cost_path),
             })
             if failed_count:
                 sys.exit(1)

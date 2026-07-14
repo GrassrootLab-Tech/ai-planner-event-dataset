@@ -3,6 +3,7 @@ from anthropic import AsyncAnthropic
 from models.chunk_anonymization import ArticleAnonymizationResult
 from prompts import load_prompt
 from utils.logger import log_pretty, logger
+from utils.pipeline_cost import TokenUsage
 
 TOOL_NAME = "submit_anonymized"
 MAX_TOKENS = 32_000
@@ -18,9 +19,13 @@ class AnthropicAnonymizationClient:
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
 
-    async def anonymize_article(self, chunks: list[str]) -> list[str]:
+    @property
+    def model(self) -> str:
+        return self._model
+
+    async def anonymize_article(self, chunks: list[str]) -> tuple[list[str], TokenUsage]:
         if not chunks:
-            return []
+            return [], TokenUsage()
 
         user_content = self._build_user_content(chunks)
         chunk_count = len(chunks)
@@ -55,19 +60,19 @@ class AnthropicAnonymizationClient:
         ) as stream:
             response = await stream.get_final_message()
 
-        usage = getattr(response, "usage", None)
+        usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
         log_pretty(
             "Anthropic token usage",
             {
-                "input_tokens": getattr(usage, "input_tokens", None),
-                "output_tokens": getattr(usage, "output_tokens", None),
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
                 "max_tokens": MAX_TOKENS,
             },
         )
 
         tool_input = self._extract_tool_input(response)
         parsed = ArticleAnonymizationResult.model_validate(tool_input)
-        return self._map_results(parsed, chunk_count)
+        return self._map_results(parsed, chunk_count), usage
 
     @staticmethod
     def _build_user_content(chunks: list[str]) -> str:

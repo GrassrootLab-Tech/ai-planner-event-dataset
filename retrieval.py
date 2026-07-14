@@ -358,7 +358,8 @@ class Retriever:
         candidate_pool: int = 100,
         top_k: int = 10,
     ) -> list[RetrievalResult]:
-        query_vector = (await self._embedder.embed_texts([query]))[0]
+        query_vector, _ = await self._embedder.embed_texts([query])
+        query_vector = query_vector[0]
         matches = self._chunk_index.query(query_vector, top_k=candidate_pool)
 
         if not matches:
@@ -442,7 +443,7 @@ async def populate_tag_index(
             format_tag_index_embed_phrase(tag_name, tag_value)
             for _, tag_name, _, tag_value in batch
         ]
-        embeddings = await embedder.embed_texts(texts)
+        embeddings, _ = await embedder.embed_texts(texts)
 
         for (vector_id, tag_name, tier, tag_value), embedding, text in zip(
             batch, embeddings, texts

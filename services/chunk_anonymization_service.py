@@ -7,6 +7,7 @@ from clients.anthropic_anonymization_client import AnthropicAnonymizationClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from utils.logger import log_pretty, logger
+from utils.pipeline_cost import usd_for_model
 from utils.pipeline_status import check_step
 
 OUTPUT_DIR = Path("output/anonymization")
@@ -32,7 +33,7 @@ class ChunkAnonymizationService:
         page_url: str,
         *,
         skip_status_check: bool = False,
-    ) -> int:
+    ) -> tuple[int, dict[str, float]]:
         if not skip_status_check:
             doc = await self._content_repo.get_by_page_url(page_url)
             check_step(
@@ -51,10 +52,10 @@ class ChunkAnonymizationService:
         if not usable_chunks:
             logger.warning("No usable chunks to anonymize for page_url=%s", page_url)
             await self._content_repo.update_status(page_url, "anonymized")
-            return 0
+            return 0, {"claude_usd": 0.0}
 
         before_texts = [chunk_doc.chunk for _, chunk_doc in usable_chunks]
-        after_texts = await self._anonymizer.anonymize_article(before_texts)
+        after_texts, usage = await self._anonymizer.anonymize_article(before_texts)
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
         output_path = self._output_dir / f"{self._url_slug(page_url)}.txt"
@@ -75,7 +76,9 @@ class ChunkAnonymizationService:
             "usable_chunk_count": len(usable_chunks),
             "output_path": str(output_path),
         })
-        return len(usable_chunks)
+        return len(usable_chunks), {
+            "claude_usd": usd_for_model(self._anonymizer.model, usage),
+        }
 
     @staticmethod
     def _format_before_after(before_texts: list[str], after_texts: list[str]) -> str:

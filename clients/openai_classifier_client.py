@@ -4,6 +4,7 @@ from models.chunk_classification import ArticleClassificationResult
 from models.event_scraped_chunk import IsUsable
 from prompts import load_prompt
 from utils.logger import log_pretty, logger
+from utils.pipeline_cost import TokenUsage
 
 CLASSIFICATION_SYSTEM_PROMPT = load_prompt("chunk_usability")
 
@@ -17,10 +18,14 @@ class OpenAIClassifierClient:
         self._client = AsyncOpenAI(api_key=api_key)
         self._model = model
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     async def classify_article(
         self,
         chunks: list[tuple[str, str | None]],
-    ) -> list[IsUsable]:
+    ) -> tuple[list[IsUsable], TokenUsage]:
         user_content = self._build_user_content(chunks)
         chunk_count = len(chunks)
 
@@ -42,7 +47,12 @@ class OpenAIClassifierClient:
         if parsed is None:
             raise ClassificationError("OpenAI returned no parsed classification result")
 
-        return self._map_results(parsed, chunk_count)
+        usage = TokenUsage.from_openai_chat(response.usage)
+        log_pretty("OpenAI classification token usage", {
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+        })
+        return self._map_results(parsed, chunk_count), usage
 
     @staticmethod
     def _build_user_content(chunks: list[tuple[str, str | None]]) -> str:

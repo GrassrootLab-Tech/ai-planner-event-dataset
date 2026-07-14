@@ -3,6 +3,7 @@ from db.event_scraped_content_repo import EventScrapedContentRepository
 from models.event_scraped_content import EventScrapedContent
 from reddit import RedditClient, is_reddit_post_url, is_reddit_url, to_storage_dict
 from utils.logger import log_pretty, logger
+from utils.pipeline_cost import HASDATA_CREDITS_PER_SCRAPE
 from utils.pipeline_status import check_scrape
 from utils.url import extract_website, strip_trailing_slash
 
@@ -18,7 +19,12 @@ class EventScraperService:
         self._repo = repo
         self._reddit = reddit
 
-    async def scrape_and_store(self, page_url: str, *, skip_status_check: bool = False) -> str:
+    async def scrape_and_store(
+        self,
+        page_url: str,
+        *,
+        skip_status_check: bool = False,
+    ) -> tuple[str, dict[str, int]]:
         page_url = strip_trailing_slash(page_url)
 
         if not skip_status_check:
@@ -35,11 +41,16 @@ class EventScraperService:
             "website": website,
         })
 
-        doc = await self._build_document(page_url, website)
+        doc, hasdata_credits = await self._build_document(page_url, website)
         logger.info("Scrape finished, storing document")
-        return await self._repo.insert(doc)
+        doc_id = await self._repo.insert(doc)
+        return doc_id, {"hasdata_credits": hasdata_credits}
 
-    async def _build_document(self, page_url: str, website: str) -> EventScrapedContent:
+    async def _build_document(
+        self,
+        page_url: str,
+        website: str,
+    ) -> tuple[EventScrapedContent, int]:
         if is_reddit_url(page_url):
             if not is_reddit_post_url(page_url):
                 raise ValueError(
@@ -55,7 +66,7 @@ class EventScraperService:
                 page_url=page_url,
                 website=website,
                 reddit_data=to_storage_dict(thread),
-            )
+            ), 0
 
         scrape_result = await self._hasdata.scrape(page_url)
         return EventScrapedContent(
@@ -63,4 +74,4 @@ class EventScraperService:
             website=website,
             raw_html=scrape_result.raw_html,
             markdown=scrape_result.markdown,
-        )
+        ), HASDATA_CREDITS_PER_SCRAPE
