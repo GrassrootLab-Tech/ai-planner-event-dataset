@@ -25,7 +25,7 @@ class ChunkEmbeddingService:
             doc = await self._content_repo.get_by_page_url(page_url)
             check_step(
                 status=doc.status if doc else None,
-                required="ai_tagged",
+                required="anonymized",
                 step_name="embedding",
             )
 

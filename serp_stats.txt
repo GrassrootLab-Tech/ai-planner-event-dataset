@@ -1,0 +1,17 @@
+*SERP URL Stats*
+
+• Docs: 636 total | 458 with results
+• Total URLs: 15,887
+• Unique URLs: 7,438 (46.82%)
+• Zero-result docs: 178 (across 59 unique base URLs)
+• Base-only results (result URL = base URL, no deeper page): 259 hits | 75 unique
+
+*Unique URLs per keyword*
+
+• party gifts → 1,623
+• party ideas → 1,319
+• party food & drinks → 1,227
+• party planning → 1,192
+• party advice → 1,053
+• party budget → 1,024
+• *Total → 7,438*

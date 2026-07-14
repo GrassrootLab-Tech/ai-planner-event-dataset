@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from clients.anthropic_anonymization_client import AnthropicAnonymizationClient
 from clients.anthropic_tagging_client import AnthropicTaggingClient
 from clients.hasdata_client import HasDataClient
 from clients.openai_classifier_client import OpenAIClassifierClient
@@ -18,6 +19,7 @@ from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from db.mongo import Mongo
 from reddit import RedditClient
+from services.chunk_anonymization_service import ChunkAnonymizationService
 from services.chunk_classification_service import ChunkClassificationService
 from services.chunk_embedding_service import ChunkEmbeddingService
 from services.chunk_tagging_service import ChunkTaggingService
@@ -51,10 +53,10 @@ def _log_settings(settings: Settings) -> None:
         "mongo_db_name": settings.mongo_db_name,
         "scraped_collection": settings.event_scraped_content_collection,
         "chunks_collection": settings.event_scraped_chunks_collection,
-        "chunk_output_dir": settings.chunk_output_dir,
         "classification_model": settings.openai_classification_model,
         "embedding_model": settings.openai_embedding_model,
         "tagging_model": settings.anthropic_tagging_model,
+        "anonymization_model": settings.anthropic_anonymization_model,
         "pinecone_index": settings.pinecone_index_name,
         "pinecone_tags_index": settings.pinecone_tags_index_name,
         "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
@@ -102,7 +104,6 @@ async def run_chunk(page_url: str) -> int:
         service = ChunkingService(
             content_repo,
             chunks_repo,
-            Path(settings.chunk_output_dir),
             min_chars=settings.chunk_min_chars,
         )
 
@@ -182,6 +183,41 @@ async def run_tag(page_url: str) -> int:
         await mongo.disconnect()
 
 
+async def run_anonymize(page_url: str) -> int:
+    set_log_stage(COMMAND_LOG_STAGES["anonymize"])
+    settings = Settings()
+    _log_settings(settings)
+
+    if not settings.anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY is required for anonymization")
+
+    mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
+    await mongo.connect()
+
+    try:
+        content_repo = EventScrapedContentRepository(
+            mongo.db[settings.event_scraped_content_collection]
+        )
+        chunks_repo = EventScrapedChunksRepository(
+            mongo.db[settings.event_scraped_chunks_collection]
+        )
+
+        anonymizer = AnthropicAnonymizationClient(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_anonymization_model,
+        )
+        service = ChunkAnonymizationService(
+            content_repo,
+            chunks_repo,
+            anonymizer,
+        )
+
+        logger.info("Starting anonymization for page_url=%s", page_url)
+        return await service.anonymize_and_store(page_url)
+    finally:
+        await mongo.disconnect()
+
+
 async def run_embed(page_url: str) -> int:
     set_log_stage(COMMAND_LOG_STAGES["embed"])
     settings = Settings()
@@ -256,6 +292,7 @@ class PipelineContext:
     chunker: ChunkingService
     classifier_service: ChunkClassificationService
     tagger_service: ChunkTaggingService
+    anonymizer_service: ChunkAnonymizationService
     embedding_service: ChunkEmbeddingService
 
     @classmethod
@@ -286,7 +323,6 @@ class PipelineContext:
             chunker=ChunkingService(
                 content_repo,
                 chunks_repo,
-                Path(settings.chunk_output_dir),
                 min_chars=settings.chunk_min_chars,
             ),
             classifier_service=ChunkClassificationService(
@@ -303,6 +339,14 @@ class PipelineContext:
                 AnthropicTaggingClient(
                     api_key=settings.anthropic_api_key or "",
                     model=settings.anthropic_tagging_model,
+                ),
+            ),
+            anonymizer_service=ChunkAnonymizationService(
+                content_repo,
+                chunks_repo,
+                AnthropicAnonymizationClient(
+                    api_key=settings.anthropic_api_key or "",
+                    model=settings.anthropic_anonymization_model,
                 ),
             ),
             embedding_service=ChunkEmbeddingService(
@@ -354,6 +398,16 @@ async def _execute_pipeline_step(
         set_log_stage(COMMAND_LOG_STAGES["tag"])
         logger.info("Starting tagging for page_url=%s", page_url)
         return await ctx.tagger_service.tag_and_store(page_url, skip_status_check=True)
+
+    if step_name == "anonymize":
+        if not ctx.settings.anthropic_api_key:
+            raise ValueError("ANTHROPIC_API_KEY is required for anonymization")
+        set_log_stage(COMMAND_LOG_STAGES["anonymize"])
+        logger.info("Starting anonymization for page_url=%s", page_url)
+        return await ctx.anonymizer_service.anonymize_and_store(
+            page_url,
+            skip_status_check=True,
+        )
 
     if step_name == "embed":
         if not ctx.settings.openai_api_key:
@@ -453,6 +507,7 @@ async def run_pipeline_report(
                 "chunk": steps["chunk"]["status"],
                 "classify": steps["classify"]["status"],
                 "tag": steps["tag"]["status"],
+                "anonymize": steps["anonymize"]["status"],
                 "embed": steps["embed"]["status"],
             })
         else:
@@ -564,6 +619,12 @@ def main() -> None:
     )
     tag_parser.add_argument("page_url", help="URL of the page to tag")
 
+    anonymize_parser = subparsers.add_parser(
+        "anonymize",
+        help="Anonymize named entities in usable chunks for a page",
+    )
+    anonymize_parser.add_argument("page_url", help="URL of the page to anonymize")
+
     embed_parser = subparsers.add_parser(
         "embed",
         help="Embed usable chunks for a page into Pinecone",
@@ -572,7 +633,7 @@ def main() -> None:
 
     run_all_parser = subparsers.add_parser(
         "run-all",
-        help="Run scrape, chunk, classify, tag, and embed for one page",
+        help="Run scrape, chunk, classify, tag, anonymize, and embed for one page",
     )
     run_all_parser.add_argument("page_url", help="URL of the page to process")
 
@@ -604,6 +665,11 @@ def main() -> None:
             tagged_count = asyncio.run(run_tag(args.page_url))
             log_pretty("Tagging completed successfully", {
                 "tagged_count": tagged_count,
+            })
+        elif args.command == "anonymize":
+            anonymized_count = asyncio.run(run_anonymize(args.page_url))
+            log_pretty("Anonymization completed successfully", {
+                "anonymized_count": anonymized_count,
             })
         elif args.command == "embed":
             embedded_count = asyncio.run(run_embed(args.page_url))

@@ -29,6 +29,12 @@ class EventScrapedChunksRepository:
             {"$set": {"metadata_tags": tags}},
         )
 
+    async def update_chunk(self, chunk_id: str, chunk: str) -> None:
+        await self._collection.update_one(
+            {"_id": ObjectId(chunk_id)},
+            {"$set": {"chunk": chunk}},
+        )
+
     async def insert_many(self, docs: list[EventScrapedChunk]) -> list[str]:
         if not docs:
             return []

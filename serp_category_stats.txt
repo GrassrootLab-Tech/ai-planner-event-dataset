@@ -1,0 +1,24 @@
+*Unique articles by category*
+_(from 7,438 unique SERP URLs; each URL counted once)_
+
+*Event type*
+• Birthday → 2,103
+• Baby shower → 181
+• Graduation → 118
+• Bridal & wedding → 1,323
+• Holiday & seasonal → 1,203
+• Housewarming & dinner party → 117
+• Kids & family → 211
+• Adult / cocktail / nightlife → 57
+
+*Topics*
+• Themes & characters → 535
+• Food & drinks → 441
+• Gifts & favors → 211
+• Activities, games & entertainment → 241
+• Advice, budget & planning → 300
+
+• Other / general → 397
+• *Total → 7,438*
+
+_Note: keyword match on title + description + URL. More specific event types win first; then topics._

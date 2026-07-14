@@ -5,10 +5,18 @@ STATUS_ORDER: list[Status] = [
     "chunked",
     "usability_classification",
     "ai_tagged",
+    "anonymized",
     "embedded",
 ]
 
-PIPELINE_STEP_NAMES: list[str] = ["scrape", "chunk", "classify", "tag", "embed"]
+PIPELINE_STEP_NAMES: list[str] = [
+    "scrape",
+    "chunk",
+    "classify",
+    "tag",
+    "anonymize",
+    "embed",
+]
 
 
 class PipelineSkip(Exception):
@@ -66,6 +74,8 @@ def steps_to_run(*, exists: bool, status: Status | None) -> list[str]:
         steps.append("classify")
     if status_index < _status_index("ai_tagged"):
         steps.append("tag")
+    if status_index < _status_index("anonymized"):
+        steps.append("anonymize")
     if status_index < _status_index("embedded"):
         steps.append("embed")
 
@@ -86,6 +96,7 @@ def skip_message_for_step(
         "chunk": "chunking",
         "classify": "classification",
         "tag": "tagging",
+        "anonymize": "anonymization",
         "embed": "embedding",
     }
     return f"Already done for {step_labels[step]}: status is '{status}'"
