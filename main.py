@@ -8,10 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from anthropic import AsyncAnthropic
+
 from clients.anthropic_anonymization_client import AnthropicAnonymizationClient
+from clients.anthropic_classifier_client import AnthropicClassifierClient
 from clients.anthropic_tagging_client import AnthropicTaggingClient
 from clients.hasdata_client import HasDataClient
-from clients.openai_classifier_client import OpenAIClassifierClient
 from clients.openai_embedding_client import OpenAIEmbeddingClient
 from clients.pinecone_client import PineconeClient
 from config import Settings
@@ -58,7 +60,7 @@ def _log_settings(settings: Settings) -> None:
         "mongo_db_name": settings.mongo_db_name,
         "scraped_collection": settings.event_scraped_content_collection,
         "chunks_collection": settings.event_scraped_chunks_collection,
-        "classification_model": settings.openai_classification_model,
+        "classification_model": settings.anthropic_classification_model,
         "embedding_model": settings.openai_embedding_model,
         "tagging_model": settings.anthropic_tagging_model,
         "anonymization_model": settings.anthropic_anonymization_model,
@@ -124,11 +126,12 @@ async def run_classify(page_url: str) -> int:
     settings = Settings()
     _log_settings(settings)
 
-    if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY is required for classification")
+    if not settings.anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY is required for classification")
 
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
+    anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     try:
         content_repo = EventScrapedContentRepository(
@@ -138,9 +141,9 @@ async def run_classify(page_url: str) -> int:
             mongo.db[settings.event_scraped_chunks_collection]
         )
 
-        classifier = OpenAIClassifierClient(
-            api_key=settings.openai_api_key,
-            model=settings.openai_classification_model,
+        classifier = AnthropicClassifierClient(
+            client=anthropic,
+            model=settings.anthropic_classification_model,
         )
         service = ChunkClassificationService(
             content_repo,
@@ -152,6 +155,7 @@ async def run_classify(page_url: str) -> int:
         classified_count, _ = await service.classify_and_store(page_url)
         return classified_count
     finally:
+        await anthropic.close()
         await mongo.disconnect()
 
 
@@ -165,6 +169,7 @@ async def run_tag(page_url: str) -> int:
 
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
+    anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     try:
         content_repo = EventScrapedContentRepository(
@@ -175,7 +180,7 @@ async def run_tag(page_url: str) -> int:
         )
 
         tagger = AnthropicTaggingClient(
-            api_key=settings.anthropic_api_key,
+            client=anthropic,
             model=settings.anthropic_tagging_model,
         )
         service = ChunkTaggingService(
@@ -188,6 +193,7 @@ async def run_tag(page_url: str) -> int:
         tagged_count, _ = await service.tag_and_store(page_url)
         return tagged_count
     finally:
+        await anthropic.close()
         await mongo.disconnect()
 
 
@@ -201,6 +207,7 @@ async def run_anonymize(page_url: str) -> int:
 
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
+    anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     try:
         content_repo = EventScrapedContentRepository(
@@ -211,7 +218,7 @@ async def run_anonymize(page_url: str) -> int:
         )
 
         anonymizer = AnthropicAnonymizationClient(
-            api_key=settings.anthropic_api_key,
+            client=anthropic,
             model=settings.anthropic_anonymization_model,
         )
         service = ChunkAnonymizationService(
@@ -224,6 +231,7 @@ async def run_anonymize(page_url: str) -> int:
         anonymized_count, _ = await service.anonymize_and_store(page_url)
         return anonymized_count
     finally:
+        await anthropic.close()
         await mongo.disconnect()
 
 
@@ -296,6 +304,7 @@ async def run_populate_tags() -> int:
 class PipelineContext:
     settings: Settings
     mongo: Mongo
+    anthropic: AsyncAnthropic
     content_repo: EventScrapedContentRepository
     chunks_repo: EventScrapedChunksRepository
     scraper: EventScraperService
@@ -319,10 +328,12 @@ class PipelineContext:
         chunks_repo = EventScrapedChunksRepository(
             mongo.db[settings.event_scraped_chunks_collection]
         )
+        anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key or "")
 
         return cls(
             settings=settings,
             mongo=mongo,
+            anthropic=anthropic,
             content_repo=content_repo,
             chunks_repo=chunks_repo,
             scraper=EventScraperService(
@@ -338,16 +349,16 @@ class PipelineContext:
             classifier_service=ChunkClassificationService(
                 content_repo,
                 chunks_repo,
-                OpenAIClassifierClient(
-                    api_key=settings.openai_api_key or "",
-                    model=settings.openai_classification_model,
+                AnthropicClassifierClient(
+                    client=anthropic,
+                    model=settings.anthropic_classification_model,
                 ),
             ),
             tagger_service=ChunkTaggingService(
                 content_repo,
                 chunks_repo,
                 AnthropicTaggingClient(
-                    api_key=settings.anthropic_api_key or "",
+                    client=anthropic,
                     model=settings.anthropic_tagging_model,
                 ),
             ),
@@ -355,7 +366,7 @@ class PipelineContext:
                 content_repo,
                 chunks_repo,
                 AnthropicAnonymizationClient(
-                    api_key=settings.anthropic_api_key or "",
+                    client=anthropic,
                     model=settings.anthropic_anonymization_model,
                 ),
             ),
@@ -374,6 +385,7 @@ class PipelineContext:
         )
 
     async def close(self) -> None:
+        await self.anthropic.close()
         await self.mongo.disconnect()
 
 
@@ -394,8 +406,8 @@ async def _execute_pipeline_step(
         return count, {}
 
     if step_name == "classify":
-        if not ctx.settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for classification")
+        if not ctx.settings.anthropic_api_key:
+            raise ValueError("ANTHROPIC_API_KEY is required for classification")
         set_log_stage(COMMAND_LOG_STAGES["classify"])
         logger.info("Starting classification for page_url=%s", page_url)
         return await ctx.classifier_service.classify_and_store(

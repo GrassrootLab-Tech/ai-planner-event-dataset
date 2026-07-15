@@ -1,4 +1,4 @@
-from clients.openai_classifier_client import OpenAIClassifierClient
+from clients.anthropic_classifier_client import AnthropicClassifierClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from utils.logger import log_pretty
@@ -11,7 +11,7 @@ class ChunkClassificationService:
         self,
         content_repo: EventScrapedContentRepository,
         chunks_repo: EventScrapedChunksRepository,
-        classifier: OpenAIClassifierClient,
+        classifier: AnthropicClassifierClient,
     ) -> None:
         self._content_repo = content_repo
         self._chunks_repo = chunks_repo
@@ -51,5 +51,5 @@ class ChunkClassificationService:
             "chunk_count": len(chunks),
         })
         return len(chunks), {
-            "gpt_classify_usd": usd_for_model(self._classifier.model, usage),
+            "claude_usd": usd_for_model(self._classifier.model, usage),
         }

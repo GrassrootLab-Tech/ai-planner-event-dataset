@@ -15,8 +15,8 @@ class AnonymizationError(Exception):
 
 
 class AnthropicAnonymizationClient:
-    def __init__(self, api_key: str, model: str) -> None:
-        self._client = AsyncAnthropic(api_key=api_key)
+    def __init__(self, client: AsyncAnthropic, model: str) -> None:
+        self._client = client
         self._model = model
 
     @property

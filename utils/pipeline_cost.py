@@ -10,7 +10,6 @@ HASDATA_CREDITS_PER_SCRAPE = 10
 _MODEL_RATES_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
-    "gpt-5.4-nano": (0.20, 1.25),
     "text-embedding-3-small": (0.02, 0.0),
 }
 
@@ -37,15 +36,6 @@ class TokenUsage:
         )
 
     @classmethod
-    def from_openai_chat(cls, usage: object | None) -> TokenUsage:
-        if usage is None:
-            return cls()
-        return cls(
-            input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
-            output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
-        )
-
-    @classmethod
     def from_openai_embedding(cls, usage: object | None) -> TokenUsage:
         if usage is None:
             return cls()
@@ -59,7 +49,6 @@ class TokenUsage:
 class ArticleCost:
     page_url: str
     claude_usd: float = 0.0
-    gpt_classify_usd: float = 0.0
     hasdata_credits: int = 0
     embedding_usd: float = 0.0
 
@@ -81,28 +70,24 @@ def _rates_for(model: str) -> tuple[float, float]:
 
 def format_cost_report(rows: list[ArticleCost]) -> str:
     header = (
-        "article_url | claude_cost_usd | gpt_classify_usd | "
-        "hasdata_credits | embedding_cost_usd"
+        "article_url | claude_cost_usd | hasdata_credits | embedding_cost_usd"
     )
     lines = [header]
     for row in rows:
         lines.append(
             f"{row.page_url} | {_fmt_usd(row.claude_usd)} | "
-            f"{_fmt_usd(row.gpt_classify_usd)} | {row.hasdata_credits} | "
-            f"{_fmt_usd(row.embedding_usd)}"
+            f"{row.hasdata_credits} | {_fmt_usd(row.embedding_usd)}"
         )
 
     total = ArticleCost(
         page_url="TOTAL",
         claude_usd=sum(r.claude_usd for r in rows),
-        gpt_classify_usd=sum(r.gpt_classify_usd for r in rows),
         hasdata_credits=sum(r.hasdata_credits for r in rows),
         embedding_usd=sum(r.embedding_usd for r in rows),
     )
     lines.append(
         f"{total.page_url} | {_fmt_usd(total.claude_usd)} | "
-        f"{_fmt_usd(total.gpt_classify_usd)} | {total.hasdata_credits} | "
-        f"{_fmt_usd(total.embedding_usd)}"
+        f"{total.hasdata_credits} | {_fmt_usd(total.embedding_usd)}"
     )
     return "\n".join(lines) + "\n"
 
@@ -125,7 +110,6 @@ def article_cost_from_steps(page_url: str, steps: dict) -> ArticleCost:
             continue
         payload = step.get("cost") or {}
         cost.claude_usd += float(payload.get("claude_usd", 0.0))
-        cost.gpt_classify_usd += float(payload.get("gpt_classify_usd", 0.0))
         cost.hasdata_credits += int(payload.get("hasdata_credits", 0))
         cost.embedding_usd += float(payload.get("embedding_usd", 0.0))
     return cost

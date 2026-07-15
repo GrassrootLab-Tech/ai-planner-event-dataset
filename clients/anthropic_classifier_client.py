@@ -1,23 +1,21 @@
 from anthropic import AsyncAnthropic
-from pydantic import BaseModel
 
-from models.chunk_tagging import build_result_model, chunk_item_to_tag_dict
-from tags.defaults import fill_missing_tag_defaults
-from tags.prompt_builder import build_system_prompt
-from tags.schema import TagValue
-from tags.spec import TagDefinition
+from models.chunk_classification import ArticleClassificationResult
+from models.event_scraped_chunk import IsUsable
+from prompts import load_prompt
 from utils.logger import log_pretty, logger
 from utils.pipeline_cost import TokenUsage
 
-TOOL_NAME = "submit_tags"
+TOOL_NAME = "submit_classifications"
 MAX_TOKENS = 32_000
+SYSTEM_PROMPT = load_prompt("chunk_usability")
 
 
-class TaggingError(Exception):
+class ClassificationError(Exception):
     pass
 
 
-class AnthropicTaggingClient:
+class AnthropicClassifierClient:
     def __init__(self, client: AsyncAnthropic, model: str) -> None:
         self._client = client
         self._model = model
@@ -28,30 +26,26 @@ class AnthropicTaggingClient:
 
     async def classify_article(
         self,
-        tags: list[TagDefinition],
         chunks: list[tuple[str, str | None]],
-    ) -> tuple[list[dict[str, TagValue]], TokenUsage, dict]:
+    ) -> tuple[list[IsUsable], TokenUsage]:
         if not chunks:
-            return [], TokenUsage(), {}
+            return [], TokenUsage()
 
-        system_prompt = build_system_prompt(tags)
         user_content = self._build_user_content(chunks)
-        response_model = build_result_model(tags)
         chunk_count = len(chunks)
 
         log_pretty(
-            "Tagging article",
+            "Classifying article",
             {
                 "model": self._model,
                 "chunk_count": chunk_count,
-                "tag_count": len(tags),
             },
         )
 
         async with self._client.messages.stream(
             model=self._model,
             max_tokens=MAX_TOKENS,
-            system=system_prompt,
+            system=SYSTEM_PROMPT,
             messages=[
                 {"role": "user", "content": user_content},
             ],
@@ -59,12 +53,11 @@ class AnthropicTaggingClient:
                 {
                     "name": TOOL_NAME,
                     "description": (
-                        "Submit tagging results for every chunk_index. "
-                        "Always include boolean tags. Omit unclassified non-boolean tags. "
-                        "Do not include chunk text. "
-                        "For multi-value tags return a list; for single tags return a string."
+                        "Submit usability classifications for every chunk_index. "
+                        "Return one usable or not_usable classification and confidence "
+                        "score for each chunk."
                     ),
-                    "input_schema": response_model.model_json_schema(),
+                    "input_schema": ArticleClassificationResult.model_json_schema(),
                 },
             ],
             tool_choice={"type": "tool", "name": TOOL_NAME},
@@ -73,7 +66,7 @@ class AnthropicTaggingClient:
 
         usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
         log_pretty(
-            "Anthropic token usage",
+            "Anthropic classification token usage",
             {
                 "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens,
@@ -82,12 +75,12 @@ class AnthropicTaggingClient:
         )
 
         tool_input = self._extract_tool_input(response)
-        parsed = response_model.model_validate(tool_input)
-        return self._map_results(parsed, chunk_count, tags), usage, tool_input
+        parsed = ArticleClassificationResult.model_validate(tool_input)
+        return self._map_results(parsed, chunk_count), usage
 
     @staticmethod
     def _build_user_content(chunks: list[tuple[str, str | None]]) -> str:
-        parts = ["Tag each section below. Return one result per chunk_index.\n"]
+        parts = ["Classify each section below. Return one result per chunk_index.\n"]
         for index, (chunk, parent_heading) in enumerate(chunks):
             parts.append(f"--- chunk_index: {index} ---")
             if parent_heading:
@@ -106,31 +99,43 @@ class AnthropicTaggingClient:
             ):
                 tool_input = getattr(block, "input", None)
                 if not isinstance(tool_input, dict):
-                    raise TaggingError("Anthropic tool_use input is not an object")
+                    raise ClassificationError(
+                        "Anthropic tool_use input is not an object"
+                    )
                 return tool_input
-        raise TaggingError("Anthropic returned no submit_tags tool_use block")
+        raise ClassificationError(
+            "Anthropic returned no submit_classifications tool_use block"
+        )
 
     @staticmethod
     def _map_results(
-        parsed: BaseModel,
+        parsed: ArticleClassificationResult,
         chunk_count: int,
-        tags: list[TagDefinition],
-    ) -> list[dict[str, TagValue]]:
-        chunks = parsed.chunks  # type: ignore[attr-defined]
-        if len(chunks) != chunk_count:
-            raise TaggingError(f"Expected {chunk_count} results, got {len(chunks)}")
+    ) -> list[IsUsable]:
+        if len(parsed.chunks) != chunk_count:
+            raise ClassificationError(
+                f"Expected {chunk_count} classifications, got {len(parsed.chunks)}"
+            )
 
-        by_index: dict[int, dict[str, TagValue]] = {}
-        for item in chunks:
+        by_index: dict[int, IsUsable] = {}
+        for item in parsed.chunks:
             if item.chunk_index in by_index:
-                raise TaggingError(f"Duplicate chunk_index {item.chunk_index}")
-            sparse_tags = chunk_item_to_tag_dict(item)
-            by_index[item.chunk_index] = fill_missing_tag_defaults(sparse_tags, tags)
+                raise ClassificationError(
+                    f"Duplicate chunk_index: {item.chunk_index}"
+                )
+            by_index[item.chunk_index] = IsUsable(
+                value=item.classification == "usable",
+                confidence=item.confidence,
+            )
 
         missing = [i for i in range(chunk_count) if i not in by_index]
         if missing:
-            raise TaggingError(f"Missing chunk_index values: {missing}")
+            raise ClassificationError(f"Missing chunk_index values: {missing}")
 
         results = [by_index[i] for i in range(chunk_count)]
-        logger.info("Tagged %d chunks", len(results))
+        logger.info(
+            "Classification result: %d usable, %d not_usable",
+            sum(1 for result in results if result.value),
+            sum(1 for result in results if not result.value),
+        )
         return results

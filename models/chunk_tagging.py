@@ -7,10 +7,14 @@ from tags.spec import TagDefinition
 
 
 def build_result_model(tags: list[TagDefinition]) -> type[BaseModel]:
-    tag_fields: dict[str, Any] = {
-        tag.name: (field_type_for_tag(tag), ...)
-        for tag in tags
-    }
+    tag_fields: dict[str, Any] = {}
+    for tag in tags:
+        field_type = field_type_for_tag(tag)
+        tag_fields[tag.name] = (
+            (field_type, ...)
+            if tag.value_type == "bool"
+            else (field_type | None, None)
+        )
     chunk_item_model = create_model(
         "TaggingChunkItem",
         chunk_index=(int, ...),
@@ -22,6 +26,7 @@ def build_result_model(tags: list[TagDefinition]) -> type[BaseModel]:
     )
 
 
-def chunk_item_to_tag_dict(item: BaseModel, tag_names: list[str]) -> dict[str, TagValue]:
-    data = item.model_dump()
-    return {name: data[name] for name in tag_names}
+def chunk_item_to_tag_dict(item: BaseModel) -> dict[str, TagValue]:
+    data = item.model_dump(exclude_unset=True, exclude_none=True)
+    data.pop("chunk_index", None)
+    return data

@@ -17,6 +17,8 @@ PAGE_URLS: list[str] = [
     # "https://partywithunicorns.com/butterfly-theme-party-ideas",
     # "https://www.partyslate.com/best-of/25-unique-party-themes-for-2025-celebrations-and-events",
     # "https://www.tagvenue.com/blog/summer-party-ideas/",
-    "https://www.littlemisspartyplanner.com/blog/a-guideline-to-planning-a-bar-or-bat-mitzvah-party",
-    "https://www.tagvenue.com/blog/summer-party-ideas/",
+    # "https://www.littlemisspartyplanner.com/blog/a-guideline-to-planning-a-bar-or-bat-mitzvah-party",
+    # "https://www.tagvenue.com/blog/summer-party-ideas/",
+    # "https://www.gigsalad.com/blog/beach-wedding/",
+    "https://www.catchmyparty.com/parties/lemon-lime-its-party-time"
 ]

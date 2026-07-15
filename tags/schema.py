@@ -13,8 +13,14 @@ def _as_list(value: Any) -> Any:
     return value
 
 
+def _as_str(value: Any) -> Any:
+    if isinstance(value, list) and len(value) == 1:
+        return value[0]
+    return value
+
+
 def field_type_for_tag(tag: TagDefinition) -> Any:
-    """Simple types for tool input_schema; multi tags coerce str → list."""
+    """Simple types for tool input_schema; coerce str↔list mismatches."""
     if tag.name == "licensed_ip_flag":
         return Annotated[list[str], BeforeValidator(_as_list)]
 
@@ -22,6 +28,6 @@ def field_type_for_tag(tag: TagDefinition) -> Any:
         case "bool":
             return bool
         case "text" | "single":
-            return str
+            return Annotated[str, BeforeValidator(_as_str)]
         case "multi":
             return Annotated[list[str], BeforeValidator(_as_list)]

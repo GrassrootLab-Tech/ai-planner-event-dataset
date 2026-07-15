@@ -3,17 +3,21 @@ from tags.spec import TagDefinition
 
 def build_system_prompt(tags: list[TagDefinition]) -> str:
     parts = [
-        "You are tagging party-planning article sections.",
-        "For each chunk_index, extract ALL tags listed below.",
-        "Return only tag values keyed by chunk_index. Do not repeat chunk text.",
-        "",
         "CRITICAL — allowed values:",
         "- For every tag that lists allowed values, you MUST choose ONLY from that exact list.",
         "- Do not invent new values, synonyms, or free-form alternatives when a list is given.",
         "- Match spelling and underscores exactly as shown.",
         "- For multi-value tags, return a list; each item must still be from the allowed list.",
-        "- If none apply and the list includes a sentinel (unspecified, not_applicable, any, none), use that.",
         "",
+        "CRITICAL — sentinel values:",
+        "- Some tag instructions permit a sentinel value (e.g. unspecified, not_applicable, none, or an empty list) ",
+        "  to represent 'this tag does not apply to this section' or 'the section does not specify this'.",
+        "- Do NOT return these sentinel values in the output. Instead, if your determined value for a tag ",
+        "  IS one of these sentinels, omit that tag's field entirely from the output for that chunk_index.",
+        "- Only omit a field when your own judgment concludes the sentinel applies to this specific section — ",
+        "  never omit a field just because the instructions mention these words as allowed options.",
+        "- If a tag clearly applies and has a real, supportable value, you MUST include it — do not omit ",
+        "  applicable tags for brevity.",
     ]
 
     for tag in tags:
