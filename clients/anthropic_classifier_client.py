@@ -54,8 +54,7 @@ class AnthropicClassifierClient:
                     "name": TOOL_NAME,
                     "description": (
                         "Submit usability classifications for every chunk_index. "
-                        "Return one usable or not_usable classification and confidence "
-                        "score for each chunk."
+                        "Return one usable or not_usable classification for each chunk."
                     ),
                     "input_schema": ArticleClassificationResult.model_json_schema(),
                 },
@@ -134,7 +133,6 @@ class AnthropicClassifierClient:
                 continue
             by_index[index] = IsUsable(
                 value=item.classification == "usable",
-                confidence=item.confidence,
             )
 
         missing = [i for i in range(chunk_count) if i not in by_index]
@@ -144,7 +142,7 @@ class AnthropicClassifierClient:
                 missing,
             )
             for index in missing:
-                by_index[index] = IsUsable(value=False, confidence=0.0)
+                by_index[index] = IsUsable(value=False)
 
         results = [by_index[i] for i in range(chunk_count)]
         logger.info(

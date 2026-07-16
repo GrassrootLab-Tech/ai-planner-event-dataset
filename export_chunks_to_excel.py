@@ -36,7 +36,6 @@ BASE_COLUMNS: tuple[str, ...] = (
     "parent_section_heading",
     "scraped_at",
     "is_usable_value",
-    "is_usable_confidence",
 )
 
 HEADER_FILL = PatternFill("solid", fgColor="2F5496")
@@ -117,7 +116,6 @@ def chunk_to_row(doc: dict[str, Any]) -> dict[str, Any]:
         "parent_section_heading": doc.get("parent_section_heading") or "",
         "scraped_at": format_datetime(doc.get("scraped_at")),
         "is_usable_value": is_usable.get("value", ""),
-        "is_usable_confidence": is_usable.get("confidence", ""),
     }
 
     metadata_tags = doc.get("metadata_tags") or {}
@@ -134,7 +132,6 @@ def autosize_columns(ws: Worksheet, columns: list[str]) -> None:
         "parent_section_heading": 28,
         "scraped_at": 20,
         "is_usable_value": 14,
-        "is_usable_confidence": 18,
     }
 
     for index, column_name in enumerate(columns, start=1):
