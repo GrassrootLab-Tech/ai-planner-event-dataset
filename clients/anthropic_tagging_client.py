@@ -38,12 +38,19 @@ class AnthropicTaggingClient:
         self,
         tags: list[TagDefinition],
         chunks: list[tuple[str, str | None]],
+        *,
+        page_url: str,
+        page_title: str | None = None,
     ) -> tuple[list[dict[str, TagValue]], TokenUsage, dict]:
         if not chunks:
             return [], TokenUsage(), {}
 
         system_prompt = build_system_prompt(tags)
-        user_content = self._build_user_content(chunks)
+        user_content = self._build_user_content(
+            chunks,
+            page_url=page_url,
+            page_title=page_title,
+        )
         response_model = build_result_model(tags)
         chunk_count = len(chunks)
 
@@ -54,6 +61,8 @@ class AnthropicTaggingClient:
                 "chunk_count": chunk_count,
                 "tag_count": len(tags),
                 "cache": self._cache,
+                "page_url": page_url,
+                "page_title": page_title,
             },
         )
 
@@ -108,8 +117,17 @@ class AnthropicTaggingClient:
         ]
 
     @staticmethod
-    def _build_user_content(chunks: list[tuple[str, str | None]]) -> str:
+    def _build_user_content(
+        chunks: list[tuple[str, str | None]],
+        *,
+        page_url: str,
+        page_title: str | None = None,
+    ) -> str:
         parts = ["Tag each section below. Return one result per chunk_index.\n"]
+        parts.append(f"page_url: {page_url}")
+        if page_title:
+            parts.append(f"page_title: {page_title}")
+        parts.append("")
         for index, (chunk, parent_heading) in enumerate(chunks):
             parts.append(f"--- chunk_index: {index} ---")
             if parent_heading:

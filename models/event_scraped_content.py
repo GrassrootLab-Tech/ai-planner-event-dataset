@@ -16,6 +16,7 @@ Status = Literal[
 class EventScrapedContent(BaseModel):
     page_url: str
     website: str
+    page_title: str | None = None
     raw_html: str | None = None
     markdown: str | None = None
     reddit_data: dict[str, Any] | None = None

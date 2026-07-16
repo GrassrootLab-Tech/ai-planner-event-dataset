@@ -70,7 +70,7 @@ def _log_settings(settings: Settings) -> None:
     })
 
 
-async def run_scrape(page_url: str) -> str:
+async def run_scrape(page_url: str, *, page_title: str | None = None) -> str:
     set_log_stage(COMMAND_LOG_STAGES["scrape"])
     settings = Settings()
     _log_settings(settings)
@@ -87,7 +87,7 @@ async def run_scrape(page_url: str) -> str:
         service = EventScraperService(hasdata, repo, reddit=_build_reddit_client(settings))
 
         logger.info("Starting scrape for page_url=%s", page_url)
-        doc_id, _ = await service.scrape_and_store(page_url)
+        doc_id, _ = await service.scrape_and_store(page_url, page_title=page_title)
         return doc_id
     finally:
         await mongo.disconnect()
@@ -390,11 +390,17 @@ async def _execute_pipeline_step(
     ctx: PipelineContext,
     step_name: str,
     page_url: str,
+    *,
+    page_title: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     if step_name == "scrape":
         set_log_stage(COMMAND_LOG_STAGES["scrape"])
         logger.info("Starting scrape for page_url=%s", page_url)
-        return await ctx.scraper.scrape_and_store(page_url, skip_status_check=True)
+        return await ctx.scraper.scrape_and_store(
+            page_url,
+            page_title=page_title,
+            skip_status_check=True,
+        )
 
     if step_name == "chunk":
         set_log_stage(COMMAND_LOG_STAGES["chunk"])
@@ -458,6 +464,7 @@ async def run_pipeline_report(
     page_url: str,
     ctx: PipelineContext | None = None,
     *,
+    page_title: str | None = None,
     cache: bool = False,
 ) -> dict[str, Any]:
     set_log_stage("pipeline")
@@ -493,7 +500,12 @@ async def run_pipeline_report(
 
         for index, step_name in enumerate(steps_to_execute):
             try:
-                result, cost = await _execute_pipeline_step(ctx, step_name, page_url)
+                result, cost = await _execute_pipeline_step(
+                    ctx,
+                    step_name,
+                    page_url,
+                    page_title=page_title,
+                )
                 steps[step_name] = _step_outcome("ok", result=result, cost=cost)
             except PipelineSkip as skip:
                 failed_at = step_name
@@ -547,8 +559,13 @@ async def run_pipeline_report(
             await ctx.close()
 
 
-async def run_all(page_url: str, *, cache: bool = False) -> dict[str, Any]:
-    report = await run_pipeline_report(page_url, cache=cache)
+async def run_all(
+    page_url: str,
+    *,
+    page_title: str | None = None,
+    cache: bool = False,
+) -> dict[str, Any]:
+    report = await run_pipeline_report(page_url, page_title=page_title, cache=cache)
     if report["status"] == "failed" and report["error_exception"] is not None:
         raise report["error_exception"]
     return report
@@ -599,8 +616,12 @@ def write_batch_report(results: list[dict[str, Any]], started_at: str) -> Path:
 async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], Path, Path]:
     from sample_website import PAGE_URLS
 
-    page_urls = [url.strip() for url in PAGE_URLS if url and url.strip()]
-    if not page_urls:
+    pages = [
+        entry
+        for entry in PAGE_URLS
+        if entry.get("url") and str(entry["url"]).strip()
+    ]
+    if not pages:
         raise ValueError("No URLs in sample_website.PAGE_URLS")
 
     started_at_dt = datetime.now(timezone.utc)
@@ -610,9 +631,19 @@ async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], 
 
     ctx = await PipelineContext.create(cache=cache)
     try:
-        for index, page_url in enumerate(page_urls, start=1):
-            logger.info("Processing sample URL %d/%d", index, len(page_urls))
-            results.append(await run_pipeline_report(page_url, ctx))
+        for index, entry in enumerate(pages, start=1):
+            page_url = str(entry["url"]).strip()
+            page_title = entry.get("page_title")
+            if isinstance(page_title, str):
+                page_title = page_title.strip() or None
+            else:
+                page_title = None
+            logger.info("Processing sample URL %d/%d", index, len(pages))
+            results.append(await run_pipeline_report(
+                page_url,
+                ctx,
+                page_title=page_title,
+            ))
             write_batch_report(results, started_at)
             write_cost_report([report["cost"] for report in results], cost_path)
     finally:
@@ -631,6 +662,11 @@ def main() -> None:
 
     scrape_parser = subparsers.add_parser("scrape", help="Scrape a page and store in MongoDB")
     scrape_parser.add_argument("page_url", help="URL of the page to scrape")
+    scrape_parser.add_argument(
+        "--page-title",
+        default=None,
+        help="Optional page title stored with the scrape and used during tagging",
+    )
 
     chunk_parser = subparsers.add_parser("chunk", help="Chunk scraped markdown for a page")
     chunk_parser.add_argument("page_url", help="URL of the page to chunk")
@@ -671,6 +707,11 @@ def main() -> None:
     )
     run_all_parser.add_argument("page_url", help="URL of the page to process")
     run_all_parser.add_argument(
+        "--page-title",
+        default=None,
+        help="Optional page title stored with the scrape and used during tagging",
+    )
+    run_all_parser.add_argument(
         "--cache",
         action="store_true",
         default=False,
@@ -697,7 +738,7 @@ def main() -> None:
 
     try:
         if args.command == "scrape":
-            doc_id = asyncio.run(run_scrape(args.page_url))
+            doc_id = asyncio.run(run_scrape(args.page_url, page_title=args.page_title))
             log_pretty("Scrape completed successfully", {"inserted_id": doc_id})
         elif args.command == "chunk":
             chunk_count = asyncio.run(run_chunk(args.page_url))
@@ -723,7 +764,11 @@ def main() -> None:
                 "embedded_count": embedded_count,
             })
         elif args.command == "run-all":
-            asyncio.run(run_all(args.page_url, cache=args.cache))
+            asyncio.run(run_all(
+                args.page_url,
+                page_title=args.page_title,
+                cache=args.cache,
+            ))
         elif args.command == "run-all-sample":
             results, report_path, cost_path = asyncio.run(
                 run_all_sample(cache=args.cache)

@@ -197,7 +197,13 @@ async def build_workbook(output_path: Path) -> tuple[int, int]:
         used_sheet_names: set[str] = set()
         total_chunks = 0
 
-        for page_url in PAGE_URLS:
+        pages = [
+            str(entry["url"]).strip()
+            for entry in PAGE_URLS
+            if entry.get("url") and str(entry["url"]).strip()
+        ]
+
+        for page_url in pages:
             rows = await fetch_chunks_by_url(repo, page_url)
             sheet_name = make_sheet_name(page_url, used_sheet_names)
             ws = workbook.create_sheet(title=sheet_name)
@@ -207,7 +213,7 @@ async def build_workbook(output_path: Path) -> tuple[int, int]:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
-        return len(PAGE_URLS), total_chunks
+        return len(pages), total_chunks
     finally:
         await mongo.disconnect()
 

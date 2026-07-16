@@ -23,9 +23,11 @@ class EventScraperService:
         self,
         page_url: str,
         *,
+        page_title: str | None = None,
         skip_status_check: bool = False,
     ) -> tuple[str, dict[str, int]]:
         page_url = strip_trailing_slash(page_url)
+        page_title = page_title.strip() if page_title else None
 
         if not skip_status_check:
             existing = await self._repo.get_by_page_url(page_url)
@@ -39,9 +41,14 @@ class EventScraperService:
         log_pretty("Prepared scrape job", {
             "page_url": page_url,
             "website": website,
+            "page_title": page_title,
         })
 
-        doc, hasdata_credits = await self._build_document(page_url, website)
+        doc, hasdata_credits = await self._build_document(
+            page_url,
+            website,
+            page_title=page_title,
+        )
         logger.info("Scrape finished, storing document")
         doc_id = await self._repo.insert(doc)
         return doc_id, {"hasdata_credits": hasdata_credits}
@@ -50,6 +57,8 @@ class EventScraperService:
         self,
         page_url: str,
         website: str,
+        *,
+        page_title: str | None = None,
     ) -> tuple[EventScrapedContent, int]:
         if is_reddit_url(page_url):
             if not is_reddit_post_url(page_url):
@@ -65,6 +74,7 @@ class EventScraperService:
             return EventScrapedContent(
                 page_url=page_url,
                 website=website,
+                page_title=page_title,
                 reddit_data=to_storage_dict(thread),
             ), 0
 
@@ -72,6 +82,7 @@ class EventScraperService:
         return EventScrapedContent(
             page_url=page_url,
             website=website,
+            page_title=page_title,
             raw_html=scrape_result.raw_html,
             markdown=scrape_result.markdown,
         ), HASDATA_CREDITS_PER_SCRAPE

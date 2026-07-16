@@ -38,8 +38,8 @@ class ChunkTaggingService:
         *,
         skip_status_check: bool = False,
     ) -> tuple[int, dict[str, float]]:
+        doc = await self._content_repo.get_by_page_url(page_url)
         if not skip_status_check:
-            doc = await self._content_repo.get_by_page_url(page_url)
             check_step(
                 status=doc.status if doc else None,
                 required="usability_classification",
@@ -66,6 +66,8 @@ class ChunkTaggingService:
         results, usage, raw_output = await self._tagger.classify_article(
             tag_defs,
             chunk_inputs,
+            page_url=page_url,
+            page_title=doc.page_title if doc else None,
         )
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
