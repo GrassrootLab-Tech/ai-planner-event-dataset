@@ -2,13 +2,10 @@ import re
 from dataclasses import dataclass
 
 HEADING_PATTERN = re.compile(
-    r"^\s*"
-    r"(?:>\s*)*"
-    r"(?:(?:\d+\.\s*|[-*+]\s+))?"
-    r"(#{2,4})"
-    r"\s*"
-    r"(.+)$",
+    r"^\s*" r"(?:>\s*)*" r"(?:(?:\d+\.\s*|[-*+]\s+))?" r"(#{2,4})" r"\s*" r"(.+)$",
 )
+
+WORD_PATTERN = re.compile(r"[A-Za-z0-9À-ÖØ-öø-ÿ]+(?:['-][A-Za-z0-9À-ÖØ-öø-ÿ]+)*")
 
 
 @dataclass
@@ -17,9 +14,8 @@ class ChunkResult:
     parent_section_heading: str | None
 
 
-def _normalize_chunk_text(text: str) -> str:
-    """Collapse whitespace for length checks only."""
-    return re.sub(r"\s+", " ", text).strip()
+def _word_count(text: str) -> int:
+    return len(WORD_PATTERN.findall(text))
 
 
 def _format_chunk_text(lines: list[str]) -> str:
@@ -47,7 +43,7 @@ def _update_heading_stack(
     heading_stack.append((level, heading_text))
 
 
-def chunk_markdown(cleaned_md: str, *, min_chars: int = 100) -> list[ChunkResult]:
+def chunk_markdown(cleaned_md: str, *, min_words: int = 25) -> list[ChunkResult]:
     lines = cleaned_md.splitlines()
     chunks: list[ChunkResult] = []
     current_lines: list[str] = []
@@ -58,7 +54,9 @@ def chunk_markdown(cleaned_md: str, *, min_chars: int = 100) -> list[ChunkResult
         nonlocal current_lines, current_parent
         text = _format_chunk_text(current_lines)
         if text:
-            chunks.append(ChunkResult(chunk=text, parent_section_heading=current_parent))
+            chunks.append(
+                ChunkResult(chunk=text, parent_section_heading=current_parent)
+            )
         current_lines = []
         current_parent = None
 
@@ -67,9 +65,9 @@ def chunk_markdown(cleaned_md: str, *, min_chars: int = 100) -> list[ChunkResult
         if match:
             marker, heading_text = match.group(1), match.group(2).strip()
             level = _heading_level(marker)
-            body_len = len(_normalize_chunk_text("\n".join(current_lines)))
+            body_words = _word_count("\n".join(current_lines))
 
-            if current_lines and body_len >= min_chars:
+            if current_lines and body_words >= min_words:
                 close_chunk()
 
             _update_heading_stack(heading_stack, level, heading_text)

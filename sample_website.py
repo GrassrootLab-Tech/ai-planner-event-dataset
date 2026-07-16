@@ -4,6 +4,12 @@
 PAGE_URLS: list[str] = [
     # "https://minteventdesign.com/blog/sweetest-unicorn-birthday-party-free-printables",
     # "https://www.brides.com/bachelor-party-ideas-5114632",
+    # "https://blog.chickabug.com/sock-monkey-party/",
+    # "https://www.classpop.com/magazine/sweet-16-gift-ideas",
+    # "https://www.ruffledblog.com/summer-bachelorette-party/",
+    # "https://www.blog.birdsparty.com/2010/11/christmas-candyland-party.html",
+    # "https://www.theknot.com/content/30a-bachelorette-party",
+    # "https://www.theknot.com/content/fort-lauderdale-bachelor-party",
     # "https://www.groopeze.com/blog/the-cost-of-a-work-christmas-party",
     # "http://homemadeparties.ph/2014/11/10/diy-tiger-party",
     # "https://www.mooreandcoevents.com/blog/nontraditional-bachelorbachelorette-party-ideas",
@@ -20,5 +26,7 @@ PAGE_URLS: list[str] = [
     # "https://www.littlemisspartyplanner.com/blog/a-guideline-to-planning-a-bar-or-bat-mitzvah-party",
     # "https://www.tagvenue.com/blog/summer-party-ideas/",
     # "https://www.gigsalad.com/blog/beach-wedding/",
-    "https://www.catchmyparty.com/parties/lemon-lime-its-party-time"
+    "https://www.catchmyparty.com/parties/lemon-lime-its-party-time",
+    # "https://www.gigsalad.com/blog/beach-wedding/",
+    # "https://www.brides.com/bachelor-party-ideas-5114632"
 ]

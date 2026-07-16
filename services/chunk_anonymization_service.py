@@ -1,17 +1,29 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlparse
 
-from clients.anthropic_anonymization_client import AnthropicAnonymizationClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from utils.logger import log_pretty, logger
-from utils.pipeline_cost import usd_for_model
+from utils.pipeline_cost import TokenUsage, usd_for_model
 from utils.pipeline_status import check_step
 
-OUTPUT_DIR = Path("output/anonymization")
+OUTPUT_DIR = Path("output/spacy_anonymization")
 SECTION_SEP = "==================="
+
+
+class AnonymizerClient(Protocol):
+    @property
+    def model(self) -> str: ...
+
+    async def anonymize_article(
+        self,
+        chunks: list[str],
+    ) -> tuple[list[str], TokenUsage]: ...
 
 
 class ChunkAnonymizationService:
@@ -19,7 +31,7 @@ class ChunkAnonymizationService:
         self,
         content_repo: EventScrapedContentRepository,
         chunks_repo: EventScrapedChunksRepository,
-        anonymizer: AnthropicAnonymizationClient,
+        anonymizer: AnonymizerClient,
         *,
         output_dir: Path = OUTPUT_DIR,
     ) -> None:

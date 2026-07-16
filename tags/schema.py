@@ -14,7 +14,7 @@ def _as_list(value: Any) -> Any:
 
 
 def _as_str(value: Any) -> Any:
-    if isinstance(value, list) and len(value) == 1:
+    if isinstance(value, list) and value:
         return value[0]
     return value
 

@@ -11,6 +11,7 @@ from utils.pipeline_cost import TokenUsage
 
 TOOL_NAME = "submit_tags"
 MAX_TOKENS = 32_000
+CACHE_TTL = "5m"
 
 
 class TaggingError(Exception):
@@ -18,9 +19,16 @@ class TaggingError(Exception):
 
 
 class AnthropicTaggingClient:
-    def __init__(self, client: AsyncAnthropic, model: str) -> None:
+    def __init__(
+        self,
+        client: AsyncAnthropic,
+        model: str,
+        *,
+        cache: bool = False,
+    ) -> None:
         self._client = client
         self._model = model
+        self._cache = cache
 
     @property
     def model(self) -> str:
@@ -45,13 +53,14 @@ class AnthropicTaggingClient:
                 "model": self._model,
                 "chunk_count": chunk_count,
                 "tag_count": len(tags),
+                "cache": self._cache,
             },
         )
 
         async with self._client.messages.stream(
             model=self._model,
             max_tokens=MAX_TOKENS,
-            system=system_prompt,
+            system=self._system_param(system_prompt),
             messages=[
                 {"role": "user", "content": user_content},
             ],
@@ -77,6 +86,8 @@ class AnthropicTaggingClient:
             {
                 "input_tokens": usage.input_tokens,
                 "output_tokens": usage.output_tokens,
+                "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+                "cache_read_input_tokens": usage.cache_read_input_tokens,
                 "max_tokens": MAX_TOKENS,
             },
         )
@@ -84,6 +95,17 @@ class AnthropicTaggingClient:
         tool_input = self._extract_tool_input(response)
         parsed = response_model.model_validate(tool_input)
         return self._map_results(parsed, chunk_count, tags), usage, tool_input
+
+    def _system_param(self, system_prompt: str) -> str | list[dict]:
+        if not self._cache:
+            return system_prompt
+        return [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral", "ttl": CACHE_TTL},
+            },
+        ]
 
     @staticmethod
     def _build_user_content(chunks: list[tuple[str, str | None]]) -> str:
@@ -118,19 +140,43 @@ class AnthropicTaggingClient:
     ) -> list[dict[str, TagValue]]:
         chunks = parsed.chunks  # type: ignore[attr-defined]
         if len(chunks) != chunk_count:
-            raise TaggingError(f"Expected {chunk_count} results, got {len(chunks)}")
+            logger.warning(
+                "Tagging result count mismatch: expected %d, got %d; "
+                "keeping valid indexes and defaulting the rest",
+                chunk_count,
+                len(chunks),
+            )
 
         by_index: dict[int, dict[str, TagValue]] = {}
         for item in chunks:
-            if item.chunk_index in by_index:
-                raise TaggingError(f"Duplicate chunk_index {item.chunk_index}")
+            index = item.chunk_index
+            if index < 0 or index >= chunk_count:
+                logger.warning("Ignoring out-of-range chunk_index %d", index)
+                continue
+            if index in by_index:
+                logger.warning(
+                    "Duplicate chunk_index %d; keeping first result",
+                    index,
+                )
+                continue
             sparse_tags = chunk_item_to_tag_dict(item)
-            by_index[item.chunk_index] = fill_missing_tag_defaults(sparse_tags, tags)
+            by_index[index] = fill_missing_tag_defaults(sparse_tags, tags)
 
         missing = [i for i in range(chunk_count) if i not in by_index]
         if missing:
-            raise TaggingError(f"Missing chunk_index values: {missing}")
+            logger.warning(
+                "Missing chunk_index values %s; filling with defaults",
+                missing,
+            )
+            defaults = AnthropicTaggingClient._default_tags(tags)
+            for index in missing:
+                by_index[index] = defaults
 
         results = [by_index[i] for i in range(chunk_count)]
         logger.info("Tagged %d chunks", len(results))
         return results
+
+    @staticmethod
+    def _default_tags(tags: list[TagDefinition]) -> dict[str, TagValue]:
+        bools = {tag.name: False for tag in tags if tag.value_type == "bool"}
+        return fill_missing_tag_defaults(bools, tags)

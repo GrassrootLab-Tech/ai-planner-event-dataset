@@ -23,11 +23,12 @@ class Settings(BaseSettings):
     event_scraped_chunks_collection: str = "event_scraped_chunks"
     event_data_serp_results_collection: str = "event_data_serp_results"
     chunk_output_dir: str = "output/cleaned"
-    chunk_min_chars: int = 100
+    chunk_min_words: int = 30
     openai_embedding_model: str = "text-embedding-3-small"
     anthropic_classification_model: str = "claude-haiku-4-5"
     anthropic_tagging_model: str = "claude-haiku-4-5"
     anthropic_anonymization_model: str = "claude-haiku-4-5"
+    spacy_anonymization_model: str = "en_core_web_md"
     anthropic_query_tagging_model: str = "claude-haiku-4-5"
     pinecone_api_key: str | None = None
     pinecone_index_name: str = "ai-planner-dataset"

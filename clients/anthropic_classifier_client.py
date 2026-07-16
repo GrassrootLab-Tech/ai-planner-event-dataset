@@ -113,24 +113,38 @@ class AnthropicClassifierClient:
         chunk_count: int,
     ) -> list[IsUsable]:
         if len(parsed.chunks) != chunk_count:
-            raise ClassificationError(
-                f"Expected {chunk_count} classifications, got {len(parsed.chunks)}"
+            logger.warning(
+                "Classification result count mismatch: expected %d, got %d; "
+                "keeping valid indexes and defaulting the rest to not_usable",
+                chunk_count,
+                len(parsed.chunks),
             )
 
         by_index: dict[int, IsUsable] = {}
         for item in parsed.chunks:
-            if item.chunk_index in by_index:
-                raise ClassificationError(
-                    f"Duplicate chunk_index: {item.chunk_index}"
+            index = item.chunk_index
+            if index < 0 or index >= chunk_count:
+                logger.warning("Ignoring out-of-range chunk_index %d", index)
+                continue
+            if index in by_index:
+                logger.warning(
+                    "Duplicate chunk_index %d; keeping first result",
+                    index,
                 )
-            by_index[item.chunk_index] = IsUsable(
+                continue
+            by_index[index] = IsUsable(
                 value=item.classification == "usable",
                 confidence=item.confidence,
             )
 
         missing = [i for i in range(chunk_count) if i not in by_index]
         if missing:
-            raise ClassificationError(f"Missing chunk_index values: {missing}")
+            logger.warning(
+                "Missing chunk_index values %s; defaulting to not_usable",
+                missing,
+            )
+            for index in missing:
+                by_index[index] = IsUsable(value=False, confidence=0.0)
 
         results = [by_index[i] for i in range(chunk_count)]
         logger.info(

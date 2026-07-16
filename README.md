@@ -20,10 +20,11 @@ Reddit posts store structured `reddit_data` (top 60 comments by score, ≤3 firs
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m spacy download en_core_web_md
 cp .env.example .env   # fill in keys
 ```
 
-Requires MongoDB locally (or update `MONGO_URI`). Reddit keys are only needed for Reddit URLs.
+Requires MongoDB locally (or update `MONGO_URI`). Reddit keys are only needed for Reddit URLs. The spaCy model `en_core_web_md` is required for the anonymization stage.
 
 ## Usage
 
@@ -36,10 +37,16 @@ python main.py scrape "<url>"
 python main.py chunk "<url>"
 python main.py classify "<url>"
 python main.py tag "<url>"
+python main.py anonymize "<url>"
 python main.py embed "<url>"
 
 # Batch from sample_website.PAGE_URLS
 python main.py run-all-sample
+
+# Enable 5-minute prompt caching for AI tagging (reduces cost on repeated runs)
+python main.py run-all-sample --cache
+python main.py tag "<url>" --cache
+python main.py run-all "<url>" --cache
 
 # Populate tag index
 python main.py populate-tags

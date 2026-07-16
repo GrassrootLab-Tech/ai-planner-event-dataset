@@ -16,11 +16,11 @@ class ChunkingService:
         content_repo: EventScrapedContentRepository,
         chunks_repo: EventScrapedChunksRepository,
         *,
-        min_chars: int = 100,
+        min_words: int = 25,
     ) -> None:
         self._content_repo = content_repo
         self._chunks_repo = chunks_repo
-        self._min_chars = min_chars
+        self._min_words = min_words
 
     async def chunk_and_store(self, page_url: str, *, skip_status_check: bool = False) -> int:
         doc = await self._content_repo.get_by_page_url(page_url)
@@ -42,7 +42,7 @@ class ChunkingService:
             if not doc.markdown:
                 raise ValueError(f"No markdown found for page_url={page_url}")
             cleaned = clean_markdown(doc.markdown)
-            chunk_results = chunk_markdown(cleaned, min_chars=self._min_chars)
+            chunk_results = chunk_markdown(cleaned, min_words=self._min_words)
 
         chunk_docs = [
             EventScrapedChunk(

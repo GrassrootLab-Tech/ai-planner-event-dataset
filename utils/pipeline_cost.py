@@ -6,11 +6,16 @@ from pathlib import Path
 
 HASDATA_CREDITS_PER_SCRAPE = 10
 
+# Multipliers relative to base input price (Anthropic prompt caching, 5m TTL).
+CACHE_WRITE_5M_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER = 0.1
+
 # USD per 1M tokens: (input, output). Embedding models use input only.
 _MODEL_RATES_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
     "text-embedding-3-small": (0.02, 0.0),
+    "en_core_web_md": (0.0, 0.0),
 }
 
 COST_OUTPUT_DIR = Path("output")
@@ -25,6 +30,8 @@ def cost_report_path_for_run(started_at: datetime) -> Path:
 class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
     @classmethod
     def from_anthropic(cls, usage: object | None) -> TokenUsage:
@@ -33,6 +40,12 @@ class TokenUsage:
         return cls(
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            cache_creation_input_tokens=int(
+                getattr(usage, "cache_creation_input_tokens", 0) or 0
+            ),
+            cache_read_input_tokens=int(
+                getattr(usage, "cache_read_input_tokens", 0) or 0
+            ),
         )
 
     @classmethod
@@ -57,6 +70,8 @@ def usd_for_model(model: str, usage: TokenUsage) -> float:
     input_rate, output_rate = _rates_for(model)
     return (
         usage.input_tokens * input_rate
+        + usage.cache_creation_input_tokens * input_rate * CACHE_WRITE_5M_MULTIPLIER
+        + usage.cache_read_input_tokens * input_rate * CACHE_READ_MULTIPLIER
         + usage.output_tokens * output_rate
     ) / 1_000_000
 
@@ -69,9 +84,7 @@ def _rates_for(model: str) -> tuple[float, float]:
 
 
 def format_cost_report(rows: list[ArticleCost]) -> str:
-    header = (
-        "article_url | claude_cost_usd | hasdata_credits | embedding_cost_usd"
-    )
+    header = "article_url | claude_cost_usd | hasdata_credits | embedding_cost_usd"
     lines = [header]
     for row in rows:
         lines.append(

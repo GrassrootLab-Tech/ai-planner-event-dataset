@@ -7,3 +7,4 @@ anthropic==0.116.0
 pinecone==9.1.0
 num2words==0.5.14
 streamlit==1.46.1
+spacy==3.8.14

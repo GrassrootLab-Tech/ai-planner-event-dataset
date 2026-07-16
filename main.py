@@ -10,12 +10,12 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
-from clients.anthropic_anonymization_client import AnthropicAnonymizationClient
 from clients.anthropic_classifier_client import AnthropicClassifierClient
 from clients.anthropic_tagging_client import AnthropicTaggingClient
 from clients.hasdata_client import HasDataClient
 from clients.openai_embedding_client import OpenAIEmbeddingClient
 from clients.pinecone_client import PineconeClient
+from clients.spacy_anonymization_client import SpacyAnonymizationClient
 from config import Settings
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
@@ -63,7 +63,7 @@ def _log_settings(settings: Settings) -> None:
         "classification_model": settings.anthropic_classification_model,
         "embedding_model": settings.openai_embedding_model,
         "tagging_model": settings.anthropic_tagging_model,
-        "anonymization_model": settings.anthropic_anonymization_model,
+        "anonymization_model": settings.spacy_anonymization_model,
         "pinecone_index": settings.pinecone_index_name,
         "pinecone_tags_index": settings.pinecone_tags_index_name,
         "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
@@ -112,7 +112,7 @@ async def run_chunk(page_url: str) -> int:
         service = ChunkingService(
             content_repo,
             chunks_repo,
-            min_chars=settings.chunk_min_chars,
+            min_words=settings.chunk_min_words,
         )
 
         logger.info("Starting chunking for page_url=%s", page_url)
@@ -159,7 +159,7 @@ async def run_classify(page_url: str) -> int:
         await mongo.disconnect()
 
 
-async def run_tag(page_url: str) -> int:
+async def run_tag(page_url: str, *, cache: bool = False) -> int:
     set_log_stage(COMMAND_LOG_STAGES["tag"])
     settings = Settings()
     _log_settings(settings)
@@ -182,6 +182,7 @@ async def run_tag(page_url: str) -> int:
         tagger = AnthropicTaggingClient(
             client=anthropic,
             model=settings.anthropic_tagging_model,
+            cache=cache,
         )
         service = ChunkTaggingService(
             content_repo,
@@ -202,12 +203,8 @@ async def run_anonymize(page_url: str) -> int:
     settings = Settings()
     _log_settings(settings)
 
-    if not settings.anthropic_api_key:
-        raise ValueError("ANTHROPIC_API_KEY is required for anonymization")
-
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
-    anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     try:
         content_repo = EventScrapedContentRepository(
@@ -217,21 +214,20 @@ async def run_anonymize(page_url: str) -> int:
             mongo.db[settings.event_scraped_chunks_collection]
         )
 
-        anonymizer = AnthropicAnonymizationClient(
-            client=anthropic,
-            model=settings.anthropic_anonymization_model,
+        anonymizer = SpacyAnonymizationClient(
+            model=settings.spacy_anonymization_model,
         )
         service = ChunkAnonymizationService(
             content_repo,
             chunks_repo,
             anonymizer,
+            output_dir=Path("output/spacy_anonymization"),
         )
 
         logger.info("Starting anonymization for page_url=%s", page_url)
         anonymized_count, _ = await service.anonymize_and_store(page_url)
         return anonymized_count
     finally:
-        await anthropic.close()
         await mongo.disconnect()
 
 
@@ -315,7 +311,7 @@ class PipelineContext:
     embedding_service: ChunkEmbeddingService
 
     @classmethod
-    async def create(cls) -> PipelineContext:
+    async def create(cls, *, cache: bool = False) -> PipelineContext:
         settings = Settings()
         _log_settings(settings)
 
@@ -344,7 +340,7 @@ class PipelineContext:
             chunker=ChunkingService(
                 content_repo,
                 chunks_repo,
-                min_chars=settings.chunk_min_chars,
+                min_words=settings.chunk_min_words,
             ),
             classifier_service=ChunkClassificationService(
                 content_repo,
@@ -360,15 +356,16 @@ class PipelineContext:
                 AnthropicTaggingClient(
                     client=anthropic,
                     model=settings.anthropic_tagging_model,
+                    cache=cache,
                 ),
             ),
             anonymizer_service=ChunkAnonymizationService(
                 content_repo,
                 chunks_repo,
-                AnthropicAnonymizationClient(
-                    client=anthropic,
-                    model=settings.anthropic_anonymization_model,
+                SpacyAnonymizationClient(
+                    model=settings.spacy_anonymization_model,
                 ),
+                output_dir=Path("output/spacy_anonymization"),
             ),
             embedding_service=ChunkEmbeddingService(
                 content_repo,
@@ -423,8 +420,6 @@ async def _execute_pipeline_step(
         return await ctx.tagger_service.tag_and_store(page_url, skip_status_check=True)
 
     if step_name == "anonymize":
-        if not ctx.settings.anthropic_api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required for anonymization")
         set_log_stage(COMMAND_LOG_STAGES["anonymize"])
         logger.info("Starting anonymization for page_url=%s", page_url)
         return await ctx.anonymizer_service.anonymize_and_store(
@@ -462,13 +457,15 @@ def _step_outcome(
 async def run_pipeline_report(
     page_url: str,
     ctx: PipelineContext | None = None,
+    *,
+    cache: bool = False,
 ) -> dict[str, Any]:
     set_log_stage("pipeline")
     logger.info("Running full pipeline for page_url=%s", page_url)
 
     own_ctx = ctx is None
     if own_ctx:
-        ctx = await PipelineContext.create()
+        ctx = await PipelineContext.create(cache=cache)
 
     assert ctx is not None
 
@@ -550,8 +547,8 @@ async def run_pipeline_report(
             await ctx.close()
 
 
-async def run_all(page_url: str) -> dict[str, Any]:
-    report = await run_pipeline_report(page_url)
+async def run_all(page_url: str, *, cache: bool = False) -> dict[str, Any]:
+    report = await run_pipeline_report(page_url, cache=cache)
     if report["status"] == "failed" and report["error_exception"] is not None:
         raise report["error_exception"]
     return report
@@ -599,7 +596,7 @@ def write_batch_report(results: list[dict[str, Any]], started_at: str) -> Path:
     return BATCH_REPORT_PATH
 
 
-async def run_all_sample() -> tuple[list[dict[str, Any]], Path, Path]:
+async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], Path, Path]:
     from sample_website import PAGE_URLS
 
     page_urls = [url.strip() for url in PAGE_URLS if url and url.strip()]
@@ -611,7 +608,7 @@ async def run_all_sample() -> tuple[list[dict[str, Any]], Path, Path]:
     cost_path = cost_report_path_for_run(started_at_dt)
     results: list[dict[str, Any]] = []
 
-    ctx = await PipelineContext.create()
+    ctx = await PipelineContext.create(cache=cache)
     try:
         for index, page_url in enumerate(page_urls, start=1):
             logger.info("Processing sample URL %d/%d", index, len(page_urls))
@@ -649,6 +646,12 @@ def main() -> None:
         help="AI-tag usable chunks for a page",
     )
     tag_parser.add_argument("page_url", help="URL of the page to tag")
+    tag_parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Cache the tagging system prompt (5m TTL)",
+    )
 
     anonymize_parser = subparsers.add_parser(
         "anonymize",
@@ -667,10 +670,22 @@ def main() -> None:
         help="Run scrape, chunk, classify, tag, anonymize, and embed for one page",
     )
     run_all_parser.add_argument("page_url", help="URL of the page to process")
+    run_all_parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Cache the tagging system prompt (5m TTL)",
+    )
 
-    subparsers.add_parser(
+    run_all_sample_parser = subparsers.add_parser(
         "run-all-sample",
         help="Run full pipeline for every URL in sample_website.py",
+    )
+    run_all_sample_parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Cache the tagging system prompt (5m TTL)",
     )
 
     subparsers.add_parser(
@@ -693,7 +708,7 @@ def main() -> None:
                 "classified_count": classified_count,
             })
         elif args.command == "tag":
-            tagged_count = asyncio.run(run_tag(args.page_url))
+            tagged_count = asyncio.run(run_tag(args.page_url, cache=args.cache))
             log_pretty("Tagging completed successfully", {
                 "tagged_count": tagged_count,
             })
@@ -708,9 +723,11 @@ def main() -> None:
                 "embedded_count": embedded_count,
             })
         elif args.command == "run-all":
-            asyncio.run(run_all(args.page_url))
+            asyncio.run(run_all(args.page_url, cache=args.cache))
         elif args.command == "run-all-sample":
-            results, report_path, cost_path = asyncio.run(run_all_sample())
+            results, report_path, cost_path = asyncio.run(
+                run_all_sample(cache=args.cache)
+            )
             failed_count = sum(1 for report in results if report["status"] == "failed")
             log_pretty("Sample batch completed", {
                 "url_count": len(results),
