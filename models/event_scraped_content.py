@@ -7,6 +7,7 @@ Status = Literal[
     "scraped",
     "chunked",
     "usability_classification",
+    "claude_batch_queued",
     "ai_tagged",
     "anonymized",
     "embedded",
@@ -22,6 +23,7 @@ class EventScrapedContent(BaseModel):
     reddit_data: dict[str, Any] | None = None
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: Status = "scraped"
+    claude_task_id: str | None = None
 
     def to_mongo(self) -> dict:
         return self.model_dump(exclude_none=True)

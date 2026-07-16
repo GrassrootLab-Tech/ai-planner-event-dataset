@@ -1,3 +1,4 @@
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from models.event_scraped_content import EventScrapedContent, Status
@@ -15,12 +16,52 @@ class EventScrapedContentRepository:
         doc.pop("_id", None)
         return EventScrapedContent.model_validate(doc)
 
+    async def get_id_by_page_url(self, page_url: str) -> str | None:
+        doc = await self._collection.find_one({"page_url": page_url}, {"_id": 1})
+        if doc is None:
+            return None
+        return str(doc["_id"])
+
+    async def get_by_id(self, content_id: str) -> EventScrapedContent | None:
+        doc = await self._collection.find_one({"_id": ObjectId(content_id)})
+        if doc is None:
+            return None
+        doc.pop("_id", None)
+        return EventScrapedContent.model_validate(doc)
+
+    async def list_by_status(
+        self,
+        status: Status,
+    ) -> list[tuple[str, EventScrapedContent]]:
+        cursor = self._collection.find({"status": status})
+        docs: list[tuple[str, EventScrapedContent]] = []
+        async for raw in cursor:
+            content_id = str(raw.pop("_id"))
+            docs.append((content_id, EventScrapedContent.model_validate(raw)))
+        return docs
+
     async def update_status(self, page_url: str, status: Status) -> None:
         await self._collection.update_one(
             {"page_url": page_url},
             {"$set": {"status": status}},
         )
         logger.info("Updated status=%s for page_url=%s", status, page_url)
+
+    async def set_claude_batch_queued(self, page_url: str, task_id: str) -> None:
+        await self._collection.update_one(
+            {"page_url": page_url},
+            {
+                "$set": {
+                    "status": "claude_batch_queued",
+                    "claude_task_id": task_id,
+                },
+            },
+        )
+        logger.info(
+            "Updated status=claude_batch_queued claude_task_id=%s for page_url=%s",
+            task_id,
+            page_url,
+        )
 
     async def insert(self, doc: EventScrapedContent) -> str:
         log_pretty("Inserting document into MongoDB", doc.to_mongo())

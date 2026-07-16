@@ -12,6 +12,12 @@ from utils.pipeline_cost import TokenUsage
 TOOL_NAME = "submit_tags"
 MAX_TOKENS = 32_000
 CACHE_TTL = "5m"
+_TOOL_DESCRIPTION = (
+    "Submit tagging results for every chunk_index. "
+    "Always include boolean tags. Omit unclassified non-boolean tags. "
+    "Do not include chunk text. "
+    "For multi-value tags return a list; for single tags return a string."
+)
 
 
 class TaggingError(Exception):
@@ -34,16 +40,17 @@ class AnthropicTaggingClient:
     def model(self) -> str:
         return self._model
 
-    async def classify_article(
+    def build_batch_request(
         self,
+        custom_id: str,
         tags: list[TagDefinition],
         chunks: list[tuple[str, str | None]],
         *,
         page_url: str,
         page_title: str | None = None,
-    ) -> tuple[list[dict[str, TagValue]], TokenUsage, dict]:
+    ) -> dict:
         if not chunks:
-            return [], TokenUsage(), {}
+            raise TaggingError("Cannot build tagging request with no chunks")
 
         system_prompt = build_system_prompt(tags)
         user_content = self._build_user_content(
@@ -52,58 +59,57 @@ class AnthropicTaggingClient:
             page_title=page_title,
         )
         response_model = build_result_model(tags)
-        chunk_count = len(chunks)
+        return {
+            "custom_id": custom_id,
+            "params": {
+                "model": self._model,
+                "max_tokens": MAX_TOKENS,
+                "system": self._system_param(system_prompt),
+                "messages": [
+                    {"role": "user", "content": user_content},
+                ],
+                "tools": [
+                    {
+                        "name": TOOL_NAME,
+                        "description": _TOOL_DESCRIPTION,
+                        "input_schema": response_model.model_json_schema(),
+                    },
+                ],
+                "tool_choice": {"type": "tool", "name": TOOL_NAME},
+            },
+        }
+
+    async def submit_batch(self, requests: list[dict]) -> str:
+        if not requests:
+            raise TaggingError("Cannot submit empty tagging batch")
 
         log_pretty(
-            "Tagging article",
+            "Submitting tagging batch",
             {
                 "model": self._model,
-                "chunk_count": chunk_count,
-                "tag_count": len(tags),
+                "request_count": len(requests),
                 "cache": self._cache,
-                "page_url": page_url,
-                "page_title": page_title,
             },
         )
-
-        async with self._client.messages.stream(
-            model=self._model,
-            max_tokens=MAX_TOKENS,
-            system=self._system_param(system_prompt),
-            messages=[
-                {"role": "user", "content": user_content},
-            ],
-            tools=[
-                {
-                    "name": TOOL_NAME,
-                    "description": (
-                        "Submit tagging results for every chunk_index. "
-                        "Always include boolean tags. Omit unclassified non-boolean tags. "
-                        "Do not include chunk text. "
-                        "For multi-value tags return a list; for single tags return a string."
-                    ),
-                    "input_schema": response_model.model_json_schema(),
-                },
-            ],
-            tool_choice={"type": "tool", "name": TOOL_NAME},
-        ) as stream:
-            response = await stream.get_final_message()
-
-        usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
-        log_pretty(
-            "Anthropic token usage",
-            {
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "cache_creation_input_tokens": usage.cache_creation_input_tokens,
-                "cache_read_input_tokens": usage.cache_read_input_tokens,
-                "max_tokens": MAX_TOKENS,
-            },
+        batch = await self._client.messages.batches.create(requests=requests)
+        logger.info(
+            "Queued tagging batch id=%s request_count=%d",
+            batch.id,
+            len(requests),
         )
+        return batch.id
 
-        tool_input = self._extract_tool_input(response)
+    def parse_message_result(
+        self,
+        message: object,
+        tags: list[TagDefinition],
+        chunk_count: int,
+    ) -> tuple[list[dict[str, TagValue]], TokenUsage, dict]:
+        usage = TokenUsage.from_anthropic(getattr(message, "usage", None))
+        tool_input = self.extract_tool_input(message)
+        response_model = build_result_model(tags)
         parsed = response_model.model_validate(tool_input)
-        return self._map_results(parsed, chunk_count, tags), usage, tool_input
+        return self.map_results(parsed, chunk_count, tags), usage, tool_input
 
     def _system_param(self, system_prompt: str) -> str | list[dict]:
         if not self._cache:
@@ -137,7 +143,7 @@ class AnthropicTaggingClient:
         return "\n".join(parts)
 
     @staticmethod
-    def _extract_tool_input(response: object) -> dict:
+    def extract_tool_input(response: object) -> dict:
         content = getattr(response, "content", None) or []
         for block in content:
             if (
@@ -151,7 +157,7 @@ class AnthropicTaggingClient:
         raise TaggingError("Anthropic returned no submit_tags tool_use block")
 
     @staticmethod
-    def _map_results(
+    def map_results(
         parsed: BaseModel,
         chunk_count: int,
         tags: list[TagDefinition],

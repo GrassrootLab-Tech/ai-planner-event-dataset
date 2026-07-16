@@ -4,6 +4,7 @@ STATUS_ORDER: list[Status] = [
     "scraped",
     "chunked",
     "usability_classification",
+    "claude_batch_queued",
     "ai_tagged",
     "anonymized",
     "embedded",
@@ -65,6 +66,9 @@ def steps_to_run(*, exists: bool, status: Status | None) -> list[str]:
         return list(PIPELINE_STEP_NAMES)
 
     current_status = status or "scraped"
+    if current_status == "claude_batch_queued":
+        return []
+
     status_index = _status_index(current_status)
     steps: list[str] = []
 
@@ -72,7 +76,7 @@ def steps_to_run(*, exists: bool, status: Status | None) -> list[str]:
         steps.append("chunk")
     if status_index < _status_index("usability_classification"):
         steps.append("classify")
-    if status_index < _status_index("ai_tagged"):
+    if status_index < _status_index("claude_batch_queued"):
         steps.append("tag")
     if status_index < _status_index("anonymized"):
         steps.append("anonymize")

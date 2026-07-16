@@ -24,7 +24,7 @@ from reddit import RedditClient
 from services.chunk_anonymization_service import ChunkAnonymizationService
 from services.chunk_classification_service import ChunkClassificationService
 from services.chunk_embedding_service import ChunkEmbeddingService
-from services.chunk_tagging_service import ChunkTaggingService
+from services.chunk_tagging_service import ChunkTaggingService, TagBatchCollector
 from services.chunking_service import ChunkingService
 from services.event_scraper_service import EventScraperService
 from retrieval import populate_tag_index
@@ -309,6 +309,7 @@ class PipelineContext:
     tagger_service: ChunkTaggingService
     anonymizer_service: ChunkAnonymizationService
     embedding_service: ChunkEmbeddingService
+    tag_collector: TagBatchCollector | None = None
 
     @classmethod
     async def create(cls, *, cache: bool = False) -> PipelineContext:
@@ -423,6 +424,16 @@ async def _execute_pipeline_step(
             raise ValueError("ANTHROPIC_API_KEY is required for tagging")
         set_log_stage(COMMAND_LOG_STAGES["tag"])
         logger.info("Starting tagging for page_url=%s", page_url)
+        if ctx.tag_collector is not None:
+            prepared = await ctx.tagger_service.prepare_tag_request(
+                page_url,
+                skip_status_check=True,
+            )
+            if prepared is None:
+                return 0, {"claude_usd": 0.0}
+            prepared_url, request, usable_count = prepared
+            ctx.tag_collector.add(prepared_url, request)
+            return usable_count, {"claude_usd": 0.0}
         return await ctx.tagger_service.tag_and_store(page_url, skip_status_check=True)
 
     if step_name == "anonymize":
@@ -494,6 +505,22 @@ async def run_pipeline_report(
                 logger.warning("%s skipped: %s", step_name, message)
                 steps[step_name] = _step_outcome("skipped", message=message)
 
+        if status == "claude_batch_queued" and not steps_to_execute:
+            cost = article_cost_from_steps(page_url, steps)
+            log_pretty("Pipeline waiting for Claude batch", {
+                "page_url": page_url,
+                "claude_task_id": doc.claude_task_id if doc else None,
+            })
+            return {
+                "page_url": page_url,
+                "status": "claude_batch_queued",
+                "steps": steps,
+                "failed_at": None,
+                "error": None,
+                "error_exception": None,
+                "cost": cost,
+            }
+
         failed_at: str | None = None
         error: str | None = None
         error_exception: Exception | None = None
@@ -507,6 +534,39 @@ async def run_pipeline_report(
                     page_title=page_title,
                 )
                 steps[step_name] = _step_outcome("ok", result=result, cost=cost)
+
+                if step_name == "tag":
+                    current = await ctx.content_repo.get_by_page_url(page_url)
+                    waiting_for_batch = (
+                        current is not None
+                        and current.status == "claude_batch_queued"
+                    ) or (
+                        ctx.tag_collector is not None
+                        and page_url in ctx.tag_collector.page_urls
+                    )
+                    if waiting_for_batch:
+                        wait_msg = "waiting for Claude batch results"
+                        for remaining in steps_to_execute[index + 1:]:
+                            steps[remaining] = _step_outcome(
+                                "skipped",
+                                message=wait_msg,
+                            )
+                        cost = article_cost_from_steps(page_url, steps)
+                        log_pretty("Pipeline paused for Claude batch", {
+                            "page_url": page_url,
+                            "claude_task_id": (
+                                current.claude_task_id if current else None
+                            ),
+                        })
+                        return {
+                            "page_url": page_url,
+                            "status": "claude_batch_queued",
+                            "steps": steps,
+                            "failed_at": None,
+                            "error": None,
+                            "error_exception": None,
+                            "cost": cost,
+                        }
             except PipelineSkip as skip:
                 failed_at = step_name
                 error = skip.message
@@ -599,8 +659,12 @@ def format_batch_report(results: list[dict[str, Any]], started_at: str) -> str:
         lines.append("")
 
     completed = sum(1 for report in results if report["status"] == "completed")
+    queued = sum(1 for report in results if report["status"] == "claude_batch_queued")
     failed = sum(1 for report in results if report["status"] == "failed")
-    lines.append(f"Summary: {completed} completed, {failed} failed, {len(results)} total")
+    lines.append(
+        f"Summary: {completed} completed, {queued} claude_batch_queued, "
+        f"{failed} failed, {len(results)} total"
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -630,6 +694,7 @@ async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], 
     results: list[dict[str, Any]] = []
 
     ctx = await PipelineContext.create(cache=cache)
+    ctx.tag_collector = TagBatchCollector()
     try:
         for index, entry in enumerate(pages, start=1):
             page_url = str(entry["url"]).strip()
@@ -646,6 +711,15 @@ async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], 
             ))
             write_batch_report(results, started_at)
             write_cost_report([report["cost"] for report in results], cost_path)
+
+        if ctx.tag_collector:
+            batch_id = await ctx.tagger_service.submit_collected_batch(ctx.tag_collector)
+            logger.info("Submitted shared tagging batch id=%s", batch_id)
+            final_cost_path = cost_report_path_for_run(started_at_dt, batch_id=batch_id)
+            write_cost_report([report["cost"] for report in results], final_cost_path)
+            if cost_path != final_cost_path and cost_path.exists():
+                cost_path.unlink()
+            cost_path = final_cost_path
     finally:
         await ctx.close()
 
@@ -750,8 +824,8 @@ def main() -> None:
             })
         elif args.command == "tag":
             tagged_count = asyncio.run(run_tag(args.page_url, cache=args.cache))
-            log_pretty("Tagging completed successfully", {
-                "tagged_count": tagged_count,
+            log_pretty("Tagging step finished", {
+                "usable_chunk_count": tagged_count,
             })
         elif args.command == "anonymize":
             anonymized_count = asyncio.run(run_anonymize(args.page_url))

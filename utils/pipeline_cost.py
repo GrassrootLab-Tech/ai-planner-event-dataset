@@ -9,6 +9,7 @@ HASDATA_CREDITS_PER_SCRAPE = 10
 # Multipliers relative to base input price (Anthropic prompt caching, 5m TTL).
 CACHE_WRITE_5M_MULTIPLIER = 1.25
 CACHE_READ_MULTIPLIER = 0.1
+BATCH_PRICE_MULTIPLIER = 0.5
 
 # USD per 1M tokens: (input, output). Embedding models use input only.
 _MODEL_RATES_PER_MTOK: dict[str, tuple[float, float]] = {
@@ -18,12 +19,22 @@ _MODEL_RATES_PER_MTOK: dict[str, tuple[float, float]] = {
     "en_core_web_md": (0.0, 0.0),
 }
 
-COST_OUTPUT_DIR = Path("output")
+COST_OUTPUT_DIR = Path("output/cost")
 
 
-def cost_report_path_for_run(started_at: datetime) -> Path:
+def cost_report_path_for_run(
+    started_at: datetime,
+    batch_id: str | None = None,
+) -> Path:
     stamp = started_at.strftime("%Y%m%d_%H%M%S")
-    return COST_OUTPUT_DIR / f"cost_endured_{stamp}.txt"
+    if batch_id:
+        return COST_OUTPUT_DIR / f"cost_endured_{stamp}_{batch_id}_normal.txt"
+    return COST_OUTPUT_DIR / f"cost_endured_{stamp}_normal.txt"
+
+
+def tagging_cost_report_path_for_run(started_at: datetime, batch_id: str) -> Path:
+    stamp = started_at.strftime("%Y%m%d_%H%M%S")
+    return COST_OUTPUT_DIR / f"cost_endured_{stamp}_{batch_id}_tagged.txt"
 
 
 @dataclass(frozen=True)
@@ -66,14 +77,17 @@ class ArticleCost:
     embedding_usd: float = 0.0
 
 
-def usd_for_model(model: str, usage: TokenUsage) -> float:
+def usd_for_model(model: str, usage: TokenUsage, *, batch: bool = False) -> float:
     input_rate, output_rate = _rates_for(model)
-    return (
+    total = (
         usage.input_tokens * input_rate
         + usage.cache_creation_input_tokens * input_rate * CACHE_WRITE_5M_MULTIPLIER
         + usage.cache_read_input_tokens * input_rate * CACHE_READ_MULTIPLIER
         + usage.output_tokens * output_rate
     ) / 1_000_000
+    if batch:
+        total *= BATCH_PRICE_MULTIPLIER
+    return total
 
 
 def _rates_for(model: str) -> tuple[float, float]:
@@ -105,9 +119,25 @@ def format_cost_report(rows: list[ArticleCost]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def format_tagging_cost_report(rows: list[ArticleCost]) -> str:
+    header = "article_url | claude_cost_usd"
+    lines = [header]
+    for row in rows:
+        lines.append(f"{row.page_url} | {_fmt_usd(row.claude_usd)}")
+    total_usd = sum(r.claude_usd for r in rows)
+    lines.append(f"TOTAL | {_fmt_usd(total_usd)}")
+    return "\n".join(lines) + "\n"
+
+
 def write_cost_report(rows: list[ArticleCost], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(format_cost_report(rows), encoding="utf-8")
+    return path
+
+
+def write_tagging_cost_report(rows: list[ArticleCost], path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_tagging_cost_report(rows), encoding="utf-8")
     return path
 
 
