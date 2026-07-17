@@ -70,6 +70,8 @@ DIRECTORY_URL_PATTERNS = [
     # Pagination
     r"/page/\d+",
     r"[?&]page=\d+",
+    r"[?&][^=&]*_page=\d+",  # Webflow-style: b84ea493_page=18
+    r"[?&][^=&]*page=\d+",  # query-0-page=7, etc.
     r"[?&]p=\d+",
     r"/p\d+/?$",
     r"[?&]paged=\d+",
