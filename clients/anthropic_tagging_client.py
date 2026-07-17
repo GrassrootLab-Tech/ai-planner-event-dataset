@@ -11,7 +11,7 @@ from utils.pipeline_cost import TokenUsage
 
 TOOL_NAME = "submit_tags"
 MAX_TOKENS = 32_000
-CACHE_TTL = "5m"
+CACHE_TTL = "1h"
 _TOOL_DESCRIPTION = (
     "Submit tagging results for every chunk_index. "
     "Always include boolean tags. Omit unclassified non-boolean tags. "

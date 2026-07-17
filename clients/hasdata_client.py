@@ -25,6 +25,11 @@ class HasDataClient:
         payload = {
             "url": page_url,
             "outputFormat": ["html", "markdown"],
+            "proxyType": "datacenter",
+            "proxyCountry": "US",
+            "jsRendering": True,
+            "blockResources": True,
+            "blockAds": True,
         }
         headers = {
             "Content-Type": "application/json",

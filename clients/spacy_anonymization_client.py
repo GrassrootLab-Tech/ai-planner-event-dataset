@@ -4,7 +4,7 @@ from spacy.tokens import Doc
 from utils.logger import log_pretty, logger
 from utils.pipeline_cost import TokenUsage
 
-EXCLUDED_LABELS = {"PERSON", "ORG"}
+HIDDEN_LABELS = {"PERSON", "ORG"}
 
 
 class SpacyAnonymizationClient:
@@ -38,7 +38,7 @@ class SpacyAnonymizationClient:
         out: list[str] = []
         last = 0
         for ent in doc.ents:
-            if ent.label_ in EXCLUDED_LABELS:
+            if ent.label_ not in HIDDEN_LABELS:
                 continue
             out.append(text[last:ent.start_char])
             out.append(f"[{ent.label_}]")

@@ -16,8 +16,11 @@ from utils.logger import log_pretty, logger, set_log_stage, setup_logging
 from utils.pipeline_cost import (
     ArticleCost,
     tagging_cost_report_path_for_run,
+    token_usage_message_record,
+    token_usage_report_path_for_batch,
     usd_for_model,
     write_tagging_cost_report,
+    write_token_usage_report,
 )
 
 
@@ -68,14 +71,36 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
 
         for task_id, batch_docs in by_batch.items():
             batch_cost_rows: list[ArticleCost] = []
+            batch_token_rows: list[dict] = []
             try:
                 batch = await anthropic.messages.batches.retrieve(task_id)
+                counts = batch.request_counts
+                finished = (
+                    counts.succeeded
+                    + counts.errored
+                    + counts.canceled
+                    + counts.expired
+                )
+                total = finished + counts.processing
+                progress_pct = (finished / total * 100) if total else 0.0
+                log_pretty("Claude batch progress", {
+                    "batch_id": task_id,
+                    "status": batch.processing_status,
+                    "total": total,
+                    "processing": counts.processing,
+                    "succeeded": counts.succeeded,
+                    "errored": counts.errored,
+                    "canceled": counts.canceled,
+                    "expired": counts.expired,
+                    "progress_pct": round(progress_pct, 1),
+                    "created_at": str(batch.created_at),
+                    "ended_at": str(batch.ended_at) if batch.ended_at else None,
+                })
                 if batch.processing_status != "ended":
                     logger.info(
-                        "Batch still %s task_id=%s (%d docs); skipping",
+                        "Batch still %s task_id=%s; skipping until ended",
                         batch.processing_status,
                         task_id,
-                        len(batch_docs),
                     )
                     skipped += len(batch_docs)
                     continue
@@ -117,16 +142,24 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                             and chunk_doc.is_usable.value
                         )
                         tag_defs = service.registry.all_tags()
-                        results, usage, raw_output = tagger.parse_message_result(
+                        results, usage, _raw_output = tagger.parse_message_result(
                             message,
                             tag_defs,
                             usable_count,
                         )
-                        await service.apply_tag_results(page_url, results, raw_output)
+                        await service.apply_tag_results(page_url, results)
 
                         claude_usd = usd_for_model(tagger.model, usage, batch=True)
                         batch_cost_rows.append(
                             ArticleCost(page_url=page_url, claude_usd=claude_usd)
+                        )
+                        batch_token_rows.append(
+                            token_usage_message_record(
+                                page_url=page_url,
+                                content_id=content_id,
+                                usage=usage,
+                                claude_usd=claude_usd,
+                            )
                         )
                         applied += 1
                         log_pretty("Applied batch tags", {
@@ -135,6 +168,12 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                             "claude_task_id": task_id,
                             "usable_chunk_count": usable_count,
                             "claude_usd": claude_usd,
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "cache_creation_input_tokens": (
+                                usage.cache_creation_input_tokens
+                            ),
+                            "cache_read_input_tokens": usage.cache_read_input_tokens,
                         })
                     except TaggingError:
                         logger.exception(
@@ -153,6 +192,14 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                     cost_path = tagging_cost_report_path_for_run(started_at, task_id)
                     write_tagging_cost_report(batch_cost_rows, cost_path)
                     cost_paths.append(str(cost_path))
+                if batch_token_rows:
+                    token_path = token_usage_report_path_for_batch(task_id)
+                    write_token_usage_report(
+                        batch_token_rows,
+                        token_path,
+                        results_url=batch.results_url,
+                    )
+                    cost_paths.append(str(token_path))
             except Exception:
                 logger.exception("Failed to fetch batch task_id=%s", task_id)
                 errors += len(batch_docs)

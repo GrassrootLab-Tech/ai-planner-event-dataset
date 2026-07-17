@@ -1,10 +1,6 @@
 import asyncio
-import hashlib
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from urllib.parse import urlparse
 
 from clients.anthropic_tagging_client import AnthropicTaggingClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
@@ -15,8 +11,6 @@ from tags.schema import TagValue
 from utils.claude_batch_ids import append_claude_batch_id
 from utils.logger import log_pretty, logger
 from utils.pipeline_status import check_step
-
-OUTPUT_DIR = Path("output/ai_tagging")
 
 
 @dataclass
@@ -39,14 +33,11 @@ class ChunkTaggingService:
         chunks_repo: EventScrapedChunksRepository,
         tagger: AnthropicTaggingClient,
         registry: TagRegistry | None = None,
-        *,
-        output_dir: Path = OUTPUT_DIR,
     ) -> None:
         self._content_repo = content_repo
         self._chunks_repo = chunks_repo
         self._tagger = tagger
         self._registry = registry or TagRegistry()
-        self._output_dir = output_dir
 
     async def prepare_tag_request(
         self,
@@ -141,7 +132,6 @@ class ChunkTaggingService:
         self,
         page_url: str,
         results: list[dict[str, TagValue]],
-        raw_output: dict,
     ) -> int:
         chunks = await self._chunks_repo.list_by_page_url(page_url)
         usable_chunks = [
@@ -155,13 +145,6 @@ class ChunkTaggingService:
                 f"expected {len(usable_chunks)}, got {len(results)}"
             )
 
-        self._output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = self._output_dir / f"{self._url_slug(page_url)}.txt"
-        output_path.write_text(
-            json.dumps(raw_output, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-
         await asyncio.gather(*[
             self._chunks_repo.update_metadata_tags(
                 chunk_id,
@@ -174,18 +157,9 @@ class ChunkTaggingService:
         log_pretty("Tagging results applied", {
             "page_url": page_url,
             "usable_chunk_count": len(usable_chunks),
-            "claude_output_path": str(output_path),
         })
         return len(usable_chunks)
 
     @property
     def registry(self) -> TagRegistry:
         return self._registry
-
-    @staticmethod
-    def _url_slug(page_url: str) -> str:
-        parsed = urlparse(page_url)
-        path = parsed.path.strip("/").replace("/", "_") or "root"
-        host = parsed.netloc.replace(".", "_")
-        digest = hashlib.sha256(page_url.encode()).hexdigest()[:8]
-        return f"{host}_{path}_{digest}"

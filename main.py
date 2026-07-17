@@ -40,6 +40,7 @@ from utils.pipeline_status import (
     skip_message_for_step,
     steps_to_run,
 )
+from utils.url import clean_page_url
 
 
 def _build_reddit_client(settings: Settings) -> RedditClient | None:
@@ -221,7 +222,6 @@ async def run_anonymize(page_url: str) -> int:
             content_repo,
             chunks_repo,
             anonymizer,
-            output_dir=Path("output/spacy_anonymization"),
         )
 
         logger.info("Starting anonymization for page_url=%s", page_url)
@@ -366,7 +366,6 @@ class PipelineContext:
                 SpacyAnonymizationClient(
                     model=settings.spacy_anonymization_model,
                 ),
-                output_dir=Path("output/spacy_anonymization"),
             ),
             embedding_service=ChunkEmbeddingService(
                 content_repo,
@@ -697,7 +696,7 @@ async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], 
     ctx.tag_collector = TagBatchCollector()
     try:
         for index, entry in enumerate(pages, start=1):
-            page_url = str(entry["url"]).strip()
+            page_url = clean_page_url(str(entry["url"]).strip())
             page_title = entry.get("page_title")
             if isinstance(page_title, str):
                 page_title = page_title.strip() or None
@@ -760,7 +759,7 @@ def main() -> None:
         "--cache",
         action="store_true",
         default=False,
-        help="Cache the tagging system prompt (5m TTL)",
+        help="Cache the tagging system prompt (1h TTL)",
     )
 
     anonymize_parser = subparsers.add_parser(
@@ -789,7 +788,7 @@ def main() -> None:
         "--cache",
         action="store_true",
         default=False,
-        help="Cache the tagging system prompt (5m TTL)",
+        help="Cache the tagging system prompt (1h TTL)",
     )
 
     run_all_sample_parser = subparsers.add_parser(
@@ -800,7 +799,7 @@ def main() -> None:
         "--cache",
         action="store_true",
         default=False,
-        help="Cache the tagging system prompt (5m TTL)",
+        help="Cache the tagging system prompt (1h TTL)",
     )
 
     subparsers.add_parser(
@@ -809,6 +808,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if hasattr(args, "page_url"):
+        args.page_url = clean_page_url(args.page_url.strip())
 
     try:
         if args.command == "scrape":

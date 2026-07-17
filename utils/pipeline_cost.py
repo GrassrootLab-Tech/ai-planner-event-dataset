@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
 HASDATA_CREDITS_PER_SCRAPE = 10
 
-# Multipliers relative to base input price (Anthropic prompt caching, 5m TTL).
-CACHE_WRITE_5M_MULTIPLIER = 1.25
+# Multipliers relative to base input price (Anthropic prompt caching, 1h TTL).
+CACHE_WRITE_1H_MULTIPLIER = 2.0
 CACHE_READ_MULTIPLIER = 0.1
 BATCH_PRICE_MULTIPLIER = 0.5
 
@@ -35,6 +36,10 @@ def cost_report_path_for_run(
 def tagging_cost_report_path_for_run(started_at: datetime, batch_id: str) -> Path:
     stamp = started_at.strftime("%Y%m%d_%H%M%S")
     return COST_OUTPUT_DIR / f"cost_endured_{stamp}_{batch_id}_tagged.txt"
+
+
+def token_usage_report_path_for_batch(batch_id: str) -> Path:
+    return COST_OUTPUT_DIR / f"cost_tokens_{batch_id}.json"
 
 
 @dataclass(frozen=True)
@@ -81,7 +86,7 @@ def usd_for_model(model: str, usage: TokenUsage, *, batch: bool = False) -> floa
     input_rate, output_rate = _rates_for(model)
     total = (
         usage.input_tokens * input_rate
-        + usage.cache_creation_input_tokens * input_rate * CACHE_WRITE_5M_MULTIPLIER
+        + usage.cache_creation_input_tokens * input_rate * CACHE_WRITE_1H_MULTIPLIER
         + usage.cache_read_input_tokens * input_rate * CACHE_READ_MULTIPLIER
         + usage.output_tokens * output_rate
     ) / 1_000_000
@@ -139,6 +144,36 @@ def write_tagging_cost_report(rows: list[ArticleCost], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(format_tagging_cost_report(rows), encoding="utf-8")
     return path
+
+
+def write_token_usage_report(
+    messages: list[dict],
+    path: Path,
+    *,
+    results_url: str | None = None,
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "results_url": results_url,
+        "messages": messages,
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def token_usage_message_record(
+    *,
+    page_url: str,
+    content_id: str,
+    usage: TokenUsage,
+    claude_usd: float,
+) -> dict:
+    return {
+        "page_url": page_url,
+        "content_id": content_id,
+        **asdict(usage),
+        "claude_usd": claude_usd,
+    }
 
 
 def _fmt_usd(value: float) -> str:

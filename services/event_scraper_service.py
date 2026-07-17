@@ -5,7 +5,7 @@ from reddit import RedditClient, is_reddit_post_url, is_reddit_url, to_storage_d
 from utils.logger import log_pretty, logger
 from utils.pipeline_cost import HASDATA_CREDITS_PER_SCRAPE
 from utils.pipeline_status import check_scrape
-from utils.url import extract_website, strip_trailing_slash
+from utils.url import clean_page_url, extract_website
 
 
 class EventScraperService:
@@ -26,7 +26,7 @@ class EventScraperService:
         page_title: str | None = None,
         skip_status_check: bool = False,
     ) -> tuple[str, dict[str, int]]:
-        page_url = strip_trailing_slash(page_url)
+        page_url = clean_page_url(page_url)
         page_title = page_title.strip() if page_title else None
 
         if not skip_status_check:
