@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -53,6 +54,99 @@ def _build_reddit_client(settings: Settings) -> RedditClient | None:
     )
 
 BATCH_REPORT_PATH = Path("output/batch_report.txt")
+STAGE_BATCH_REPORT_PATH = Path("output/stage_batch_report.txt")
+STAGE_CHOICES = tuple(PIPELINE_STEP_NAMES)
+
+
+def normalize_pages(
+    raw: Any,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+    source: str = "URL list",
+) -> list[dict[str, str | None]]:
+    """Validate/clean [{url, page_title?}, ...], then apply skip/limit."""
+    if not isinstance(raw, list):
+        raise ValueError(f"Expected a list of URL objects in {source}")
+
+    pages: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Entry {index} in {source} must be an object")
+        url_raw = entry.get("url")
+        if not isinstance(url_raw, str) or not url_raw.strip():
+            url_raw = entry.get("page_url")
+        if not isinstance(url_raw, str) or not url_raw.strip():
+            continue
+        page_url = clean_page_url(url_raw.strip())
+        if not page_url or page_url in seen:
+            continue
+        seen.add(page_url)
+        title = entry.get("page_title")
+        if isinstance(title, str):
+            title = title.strip() or None
+        else:
+            title = None
+        pages.append({"url": page_url, "page_title": title})
+
+    if skip < 0:
+        raise ValueError("--skip must be >= 0")
+    if limit is not None and limit < 1:
+        raise ValueError("--limit must be >= 1")
+
+    sliced = pages[skip:]
+    if limit is not None:
+        sliced = sliced[:limit]
+    return sliced
+
+
+def load_pages_from_json(
+    path: Path,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, str | None]]:
+    """Load URL objects from JSON, clean/dedupe them, and apply skip/limit."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return normalize_pages(raw, skip=skip, limit=limit, source=str(path))
+
+
+def load_batch_pages(
+    json_path: Path | None,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+) -> tuple[list[dict[str, str | None]], str]:
+    """Load pages from JSON or sample_website.PAGE_URLS when json_path is None."""
+    if json_path is None:
+        from sample_website import PAGE_URLS
+
+        pages = normalize_pages(
+            PAGE_URLS,
+            skip=skip,
+            limit=limit,
+            source="sample_website.PAGE_URLS",
+        )
+        return pages, "sample_website.py"
+
+    pages = load_pages_from_json(json_path, skip=skip, limit=limit)
+    return pages, json_path.name
+
+
+def _add_skip_limit_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--skip",
+        type=int,
+        default=0,
+        help="Skip the first N URLs after loading/deduping (default: 0)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Process at most N URLs after --skip (default: all remaining)",
+    )
 
 
 def _log_settings(settings: Settings) -> None:
@@ -392,6 +486,7 @@ async def _execute_pipeline_step(
     page_url: str,
     *,
     page_title: str | None = None,
+    skip_status_check: bool = True,
 ) -> tuple[Any, dict[str, Any]]:
     if step_name == "scrape":
         set_log_stage(COMMAND_LOG_STAGES["scrape"])
@@ -399,13 +494,16 @@ async def _execute_pipeline_step(
         return await ctx.scraper.scrape_and_store(
             page_url,
             page_title=page_title,
-            skip_status_check=True,
+            skip_status_check=skip_status_check,
         )
 
     if step_name == "chunk":
         set_log_stage(COMMAND_LOG_STAGES["chunk"])
         logger.info("Starting chunking for page_url=%s", page_url)
-        count = await ctx.chunker.chunk_and_store(page_url, skip_status_check=True)
+        count = await ctx.chunker.chunk_and_store(
+            page_url,
+            skip_status_check=skip_status_check,
+        )
         return count, {}
 
     if step_name == "classify":
@@ -415,7 +513,7 @@ async def _execute_pipeline_step(
         logger.info("Starting classification for page_url=%s", page_url)
         return await ctx.classifier_service.classify_and_store(
             page_url,
-            skip_status_check=True,
+            skip_status_check=skip_status_check,
         )
 
     if step_name == "tag":
@@ -426,21 +524,24 @@ async def _execute_pipeline_step(
         if ctx.tag_collector is not None:
             prepared = await ctx.tagger_service.prepare_tag_request(
                 page_url,
-                skip_status_check=True,
+                skip_status_check=skip_status_check,
             )
             if prepared is None:
                 return 0, {"claude_usd": 0.0}
             prepared_url, request, usable_count = prepared
             ctx.tag_collector.add(prepared_url, request)
             return usable_count, {"claude_usd": 0.0}
-        return await ctx.tagger_service.tag_and_store(page_url, skip_status_check=True)
+        return await ctx.tagger_service.tag_and_store(
+            page_url,
+            skip_status_check=skip_status_check,
+        )
 
     if step_name == "anonymize":
         set_log_stage(COMMAND_LOG_STAGES["anonymize"])
         logger.info("Starting anonymization for page_url=%s", page_url)
         return await ctx.anonymizer_service.anonymize_and_store(
             page_url,
-            skip_status_check=True,
+            skip_status_check=skip_status_check,
         )
 
     if step_name == "embed":
@@ -450,7 +551,10 @@ async def _execute_pipeline_step(
             raise ValueError("PINECONE_API_KEY is required for embedding")
         set_log_stage(COMMAND_LOG_STAGES["embed"])
         logger.info("Starting embedding for page_url=%s", page_url)
-        return await ctx.embedding_service.embed_and_store(page_url, skip_status_check=True)
+        return await ctx.embedding_service.embed_and_store(
+            page_url,
+            skip_status_check=skip_status_check,
+        )
 
     raise ValueError(f"Unknown pipeline step: {step_name}")
 
@@ -676,16 +780,16 @@ def write_batch_report(results: list[dict[str, Any]], started_at: str) -> Path:
     return BATCH_REPORT_PATH
 
 
-async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], Path, Path]:
-    from sample_website import PAGE_URLS
-
-    pages = [
-        entry
-        for entry in PAGE_URLS
-        if entry.get("url") and str(entry["url"]).strip()
-    ]
+async def run_all_sample(
+    json_path: Path | None = None,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+    cache: bool = False,
+) -> tuple[list[dict[str, Any]], Path, Path]:
+    pages, source_name = load_batch_pages(json_path, skip=skip, limit=limit)
     if not pages:
-        raise ValueError("No URLs in sample_website.PAGE_URLS")
+        raise ValueError(f"No URLs to process in {source_name} (after skip/limit)")
 
     started_at_dt = datetime.now(timezone.utc)
     started_at = started_at_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -696,13 +800,18 @@ async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], 
     ctx.tag_collector = TagBatchCollector()
     try:
         for index, entry in enumerate(pages, start=1):
-            page_url = clean_page_url(str(entry["url"]).strip())
+            page_url = str(entry["url"])
             page_title = entry.get("page_title")
             if isinstance(page_title, str):
                 page_title = page_title.strip() or None
             else:
                 page_title = None
-            logger.info("Processing sample URL %d/%d", index, len(pages))
+            logger.info(
+                "Processing URL %d/%d from %s",
+                index,
+                len(pages),
+                source_name,
+            )
             results.append(await run_pipeline_report(
                 page_url,
                 ctx,
@@ -725,6 +834,139 @@ async def run_all_sample(*, cache: bool = False) -> tuple[list[dict[str, Any]], 
     report_path = write_batch_report(results, started_at)
     write_cost_report([report["cost"] for report in results], cost_path)
     return results, report_path, cost_path
+
+
+def format_stage_batch_report(
+    stage: str,
+    results: list[dict[str, Any]],
+    started_at: str,
+) -> str:
+    lines = [
+        f"Stage batch started: {started_at}",
+        f"Stage: {stage}",
+        f"Total URLs: {len(results)}",
+        "",
+    ]
+    for index, report in enumerate(results, start=1):
+        lines.append(f"[{index}/{len(results)}] {report['page_url']}")
+        lines.append(f"  RESULT: {report['status']}")
+        if report.get("message"):
+            lines.append(f"  MESSAGE: {report['message']}")
+        if report.get("result") is not None:
+            lines.append(f"  RESULT_VALUE: {report['result']}")
+        lines.append("")
+
+    ok = sum(1 for report in results if report["status"] == "ok")
+    skipped = sum(1 for report in results if report["status"] == "skipped")
+    queued = sum(1 for report in results if report["status"] == "claude_batch_queued")
+    failed = sum(1 for report in results if report["status"] == "failed")
+    lines.append(
+        f"Summary: {ok} ok, {skipped} skipped, {queued} claude_batch_queued, "
+        f"{failed} failed, {len(results)} total"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def write_stage_batch_report(
+    stage: str,
+    results: list[dict[str, Any]],
+    started_at: str,
+) -> Path:
+    STAGE_BATCH_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STAGE_BATCH_REPORT_PATH.write_text(
+        format_stage_batch_report(stage, results, started_at),
+        encoding="utf-8",
+    )
+    return STAGE_BATCH_REPORT_PATH
+
+
+async def run_stage_batch(
+    stage: str,
+    json_path: Path | None = None,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+    cache: bool = False,
+) -> tuple[list[dict[str, Any]], Path]:
+    if stage not in STAGE_CHOICES:
+        raise ValueError(f"Unknown stage {stage!r}; choose from {STAGE_CHOICES}")
+
+    pages, source_name = load_batch_pages(json_path, skip=skip, limit=limit)
+    if not pages:
+        raise ValueError(f"No URLs to process in {source_name} (after skip/limit)")
+
+    started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    results: list[dict[str, Any]] = []
+
+    ctx = await PipelineContext.create(cache=cache)
+    if stage == "tag":
+        ctx.tag_collector = TagBatchCollector()
+    try:
+        for index, entry in enumerate(pages, start=1):
+            page_url = str(entry["url"])
+            page_title = entry.get("page_title")
+            if isinstance(page_title, str):
+                page_title = page_title.strip() or None
+            else:
+                page_title = None
+
+            logger.info(
+                "Stage %s URL %d/%d from %s",
+                stage,
+                index,
+                len(pages),
+                source_name,
+            )
+            try:
+                result, _cost = await _execute_pipeline_step(
+                    ctx,
+                    stage,
+                    page_url,
+                    page_title=page_title,
+                    skip_status_check=False,
+                )
+                status = "ok"
+                message = None
+                if stage == "tag" and ctx.tag_collector is not None:
+                    if page_url in ctx.tag_collector.page_urls:
+                        status = "claude_batch_queued"
+                        message = "queued for shared Claude batch"
+                results.append({
+                    "page_url": page_url,
+                    "status": status,
+                    "message": message,
+                    "result": result,
+                })
+            except PipelineSkip as skip_exc:
+                logger.warning("%s skipped for %s: %s", stage, page_url, skip_exc.message)
+                results.append({
+                    "page_url": page_url,
+                    "status": "skipped",
+                    "message": skip_exc.message,
+                    "result": None,
+                })
+            except Exception as exc:
+                logger.exception("%s failed for page_url=%s", stage, page_url)
+                results.append({
+                    "page_url": page_url,
+                    "status": "failed",
+                    "message": str(exc),
+                    "result": None,
+                })
+
+            write_stage_batch_report(stage, results, started_at)
+
+        if stage == "tag" and ctx.tag_collector and ctx.tag_collector.page_urls:
+            batch_id = await ctx.tagger_service.submit_collected_batch(ctx.tag_collector)
+            logger.info("Submitted shared tagging batch id=%s", batch_id)
+            for report in results:
+                if report["status"] == "claude_batch_queued":
+                    report["message"] = f"submitted Claude batch id={batch_id}"
+    finally:
+        await ctx.close()
+
+    report_path = write_stage_batch_report(stage, results, started_at)
+    return results, report_path
 
 
 def main() -> None:
@@ -793,13 +1035,55 @@ def main() -> None:
 
     run_all_sample_parser = subparsers.add_parser(
         "run-all-sample",
-        help="Run full pipeline for every URL in sample_website.py",
+        help=(
+            "Run full pipeline from a JSON file, or sample_website.py "
+            "when no file is provided"
+        ),
     )
+    run_all_sample_parser.add_argument(
+        "json_path",
+        nargs="?",
+        type=Path,
+        help=(
+            "Optional JSON array of {url, page_title?} objects; "
+            "defaults to sample_website.PAGE_URLS"
+        ),
+    )
+    _add_skip_limit_args(run_all_sample_parser)
     run_all_sample_parser.add_argument(
         "--cache",
         action="store_true",
         default=False,
         help="Cache the tagging system prompt (1h TTL)",
+    )
+
+    run_stage_batch_parser = subparsers.add_parser(
+        "run-stage-batch",
+        help=(
+            "Run a single pipeline stage from a JSON file, or sample_website.py "
+            "when no file is provided"
+        ),
+    )
+    run_stage_batch_parser.add_argument(
+        "stage",
+        choices=STAGE_CHOICES,
+        help="Pipeline stage to run",
+    )
+    run_stage_batch_parser.add_argument(
+        "json_path",
+        nargs="?",
+        type=Path,
+        help=(
+            "Optional JSON array of {url, page_title?} objects; "
+            "defaults to sample_website.PAGE_URLS"
+        ),
+    )
+    _add_skip_limit_args(run_stage_batch_parser)
+    run_stage_batch_parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        help="Cache the tagging system prompt (1h TTL; tag stage only)",
     )
 
     subparsers.add_parser(
@@ -846,7 +1130,12 @@ def main() -> None:
             ))
         elif args.command == "run-all-sample":
             results, report_path, cost_path = asyncio.run(
-                run_all_sample(cache=args.cache)
+                run_all_sample(
+                    args.json_path,
+                    skip=args.skip,
+                    limit=args.limit,
+                    cache=args.cache,
+                )
             )
             failed_count = sum(1 for report in results if report["status"] == "failed")
             log_pretty("Sample batch completed", {
@@ -854,6 +1143,25 @@ def main() -> None:
                 "failed_count": failed_count,
                 "report_path": str(report_path),
                 "cost_path": str(cost_path),
+            })
+            if failed_count:
+                sys.exit(1)
+        elif args.command == "run-stage-batch":
+            results, report_path = asyncio.run(
+                run_stage_batch(
+                    args.stage,
+                    args.json_path,
+                    skip=args.skip,
+                    limit=args.limit,
+                    cache=args.cache,
+                )
+            )
+            failed_count = sum(1 for report in results if report["status"] == "failed")
+            log_pretty("Stage batch completed", {
+                "stage": args.stage,
+                "url_count": len(results),
+                "failed_count": failed_count,
+                "report_path": str(report_path),
             })
             if failed_count:
                 sys.exit(1)
