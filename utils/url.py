@@ -2,12 +2,12 @@ from urllib.parse import urlparse
 
 
 def strip_trailing_slash(page_url: str) -> str:
-    """Remove a trailing slash from a page URL, if present."""
-    return page_url[:-1] if page_url.endswith("/") else page_url
+    """Remove trailing slash or backslash characters from a page URL."""
+    return page_url.rstrip("/\\")
 
 
 def clean_page_url(page_url: str) -> str:
-    """Strip query params and a trailing slash from a page URL."""
+    """Strip query params and trailing slash/backslash from a page URL."""
     page_url = page_url.split("?", 1)[0]
     return strip_trailing_slash(page_url)
 

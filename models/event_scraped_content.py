@@ -11,6 +11,7 @@ Status = Literal[
     "ai_tagged",
     "anonymized",
     "embedded",
+    "failed",
 ]
 
 

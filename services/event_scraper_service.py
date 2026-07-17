@@ -1,4 +1,4 @@
-from clients.hasdata_client import HasDataClient
+from clients.hasdata_client import HasDataClient, ScrapeError
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from models.event_scraped_content import EventScrapedContent
 from reddit import RedditClient, is_reddit_post_url, is_reddit_url, to_storage_dict
@@ -6,6 +6,8 @@ from utils.logger import log_pretty, logger
 from utils.pipeline_cost import HASDATA_CREDITS_PER_SCRAPE
 from utils.pipeline_status import check_scrape
 from utils.url import clean_page_url, extract_website
+
+LOCAL_RATE_LIMITED_MARKER = "local_rate_limited"
 
 
 class EventScraperService:
@@ -29,8 +31,8 @@ class EventScraperService:
         page_url = clean_page_url(page_url)
         page_title = page_title.strip() if page_title else None
 
+        existing = await self._repo.get_by_page_url(page_url)
         if not skip_status_check:
-            existing = await self._repo.get_by_page_url(page_url)
             check_scrape(
                 exists=existing is not None,
                 status=existing.status if existing else None,
@@ -49,8 +51,18 @@ class EventScraperService:
             website,
             page_title=page_title,
         )
-        logger.info("Scrape finished, storing document")
-        doc_id = await self._repo.insert(doc)
+        logger.info("Scrape finished, storing document status=%s", doc.status)
+        if existing is not None and existing.status == "failed":
+            doc_id = await self._repo.replace_by_page_url(page_url, doc)
+        else:
+            doc_id = await self._repo.insert(doc)
+
+        if doc.status == "failed":
+            raise ScrapeError(
+                f"HasData markdown contains {LOCAL_RATE_LIMITED_MARKER!r} "
+                f"for page_url={page_url}"
+            )
+
         return doc_id, {"hasdata_credits": hasdata_credits}
 
     async def _build_document(
@@ -79,10 +91,12 @@ class EventScraperService:
             ), 0
 
         scrape_result = await self._hasdata.scrape(page_url)
+        rate_limited = LOCAL_RATE_LIMITED_MARKER in scrape_result.markdown
         return EventScrapedContent(
             page_url=page_url,
             website=website,
             page_title=page_title,
             raw_html=scrape_result.raw_html,
             markdown=scrape_result.markdown,
+            status="failed" if rate_limited else "scraped",
         ), HASDATA_CREDITS_PER_SCRAPE

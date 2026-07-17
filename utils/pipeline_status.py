@@ -32,7 +32,7 @@ def _status_index(status: Status) -> int:
 
 
 def check_scrape(*, exists: bool, status: Status | None, page_url: str) -> None:
-    if exists:
+    if exists and status != "failed":
         raise PipelineSkip(
             "already_done",
             f"Already scraped: page_url={page_url} (status={status})",
@@ -44,6 +44,12 @@ def check_step(*, status: Status | None, required: Status, step_name: str) -> No
         raise PipelineSkip(
             "not_ready",
             f"Not yet ready for {step_name}: page has not been scraped",
+        )
+
+    if status == "failed":
+        raise PipelineSkip(
+            "not_ready",
+            f"Not yet ready for {step_name}: scrape status is 'failed'",
         )
 
     if status == required:
@@ -66,6 +72,8 @@ def steps_to_run(*, exists: bool, status: Status | None) -> list[str]:
         return list(PIPELINE_STEP_NAMES)
 
     current_status = status or "scraped"
+    if current_status == "failed":
+        return list(PIPELINE_STEP_NAMES)
     if current_status == "claude_batch_queued":
         return []
 

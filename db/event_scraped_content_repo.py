@@ -69,3 +69,14 @@ class EventScrapedContentRepository:
         inserted_id = str(result.inserted_id)
         logger.info("Document saved with id=%s", inserted_id)
         return inserted_id
+
+    async def replace_by_page_url(self, page_url: str, doc: EventScrapedContent) -> str:
+        existing = await self._collection.find_one({"page_url": page_url}, {"_id": 1})
+        if existing is None:
+            raise ValueError(f"No document to replace for page_url={page_url}")
+        payload = doc.to_mongo()
+        log_pretty("Replacing document in MongoDB", payload)
+        await self._collection.replace_one({"_id": existing["_id"]}, payload)
+        replaced_id = str(existing["_id"])
+        logger.info("Document replaced with id=%s", replaced_id)
+        return replaced_id
