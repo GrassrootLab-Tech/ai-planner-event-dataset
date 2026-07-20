@@ -31,5 +31,5 @@ class Settings(BaseSettings):
     spacy_anonymization_model: str = "en_core_web_md"
     anthropic_query_tagging_model: str = "claude-haiku-4-5"
     pinecone_api_key: str | None = None
-    pinecone_index_name: str = "ai-planner-event-dataset"
+    pinecone_index_name: str = "ai-planner-dataset"
     pinecone_tags_index_name: str = "ai-planner-tags"

@@ -17,6 +17,26 @@ class EventScrapedChunksRepository:
             results.append((chunk_id, EventScrapedChunk.model_validate(doc)))
         return results
 
+    async def list_ids_by_page_urls(
+        self,
+        page_urls: list[str],
+    ) -> dict[str, set[str]]:
+        """Return {page_url: {chunk_id, ...}} for the given page URLs."""
+        if not page_urls:
+            return {}
+
+        by_page: dict[str, set[str]] = {url: set() for url in page_urls}
+        cursor = self._collection.find(
+            {"page_url": {"$in": page_urls}},
+            {"_id": 1, "page_url": 1},
+        )
+        async for doc in cursor:
+            page_url = doc.get("page_url")
+            if not isinstance(page_url, str):
+                continue
+            by_page.setdefault(page_url, set()).add(str(doc["_id"]))
+        return by_page
+
     async def update_is_usable(self, chunk_id: str, is_usable: IsUsable) -> None:
         await self._collection.update_one(
             {"_id": ObjectId(chunk_id)},
