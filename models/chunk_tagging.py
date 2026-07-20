@@ -10,8 +10,10 @@ def build_result_model(tags: list[TagDefinition]) -> type[BaseModel]:
     tag_fields: dict[str, Any] = {}
     for tag in tags:
         field_type = field_type_for_tag(tag)
+        # Bools are required in the schema Claude should fill, but models
+        # sometimes omit them — default missing ones to False.
         tag_fields[tag.name] = (
-            (field_type, ...)
+            (field_type, False)
             if tag.value_type == "bool"
             else (field_type | None, None)
         )

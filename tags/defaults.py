@@ -62,7 +62,8 @@ def fill_missing_tag_defaults(
         if tag.name in values:
             result[tag.name] = values[tag.name]
         elif tag.value_type == "bool":
-            raise ValueError(f"Missing required boolean tag: {tag.name}")
+            # Claude sometimes omits required bools — default to False for now.
+            result[tag.name] = False
         else:
             result[tag.name] = TAG_DEFAULTS[tag.name]
     return result
