@@ -1,11 +1,13 @@
 """Split single_articles.json into domain-diverse batches.
 
-Interleaves URLs by domain, then deals them round-robin across 7 batches so
-every batch gets a rich domain mix. Each URL appears in exactly one batch.
+Dedupes with clean_page_url (strip query params + trailing slash/backslash),
+interleaves URLs by domain, then deals them round-robin across batches so
+every batch gets a rich domain mix. Each cleaned URL appears in exactly one
+batch.
 
-Sizes: batch_01..batch_06 = 1000, batch_07 = remainder (1011 for 7011 urls).
+Sizes: full batches of BATCH_SIZE, last batch = remainder.
 
-Output: input_urls/article_batches/batch_01.json … batch_07.json
+Output: input_urls/article_batches/batch_01.json …
 """
 
 from __future__ import annotations
@@ -13,12 +15,18 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.url import clean_page_url
+
 DEFAULT_INPUT = ROOT / "input_urls" / "single_articles.json"
 DEFAULT_OUTPUT_DIR = ROOT / "input_urls" / "article_batches"
 NUM_BATCHES = 7
@@ -118,11 +126,16 @@ def main() -> None:
     seen: set[str] = set()
     unique: list[dict[str, Any]] = []
     for item in items:
-        url = item.get("url") or ""
-        if not url or url in seen:
+        url = item.get("url") or item.get("page_url") or ""
+        if not isinstance(url, str) or not url.strip():
             continue
-        seen.add(url)
-        unique.append(item)
+        cleaned = clean_page_url(url.strip())
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        cleaned_item = {k: v for k, v in item.items() if k != "page_url"}
+        cleaned_item["url"] = cleaned
+        unique.append(cleaned_item)
 
     interleaved = interleave_by_domain(unique, seed=args.seed)
     batches = deal_into_batches(interleaved)
