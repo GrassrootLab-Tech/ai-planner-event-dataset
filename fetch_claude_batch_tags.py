@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
 from db.mongo import Mongo
 from services.chunk_tagging_service import ChunkTaggingService
+from utils.concurrency import map_concurrent
 from utils.logger import log_pretty, logger, set_log_stage, setup_logging
 from utils.pipeline_cost import (
     ArticleCost,
@@ -24,8 +26,11 @@ from utils.pipeline_cost import (
 )
 
 
-async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
+async def fetch_and_apply_batch_tags(*, concurrency: int = 1) -> tuple[int, int, int]:
     set_log_stage("ai_tagging")
+    if concurrency < 1:
+        raise ValueError("--concurrency must be >= 1")
+
     settings = Settings()
 
     if not settings.anthropic_api_key:
@@ -54,7 +59,11 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
         service = ChunkTaggingService(content_repo, chunks_repo, tagger)
 
         docs = await content_repo.list_by_status("claude_batch_queued")
-        logger.info("Found %d docs with status=claude_batch_queued", len(docs))
+        logger.info(
+            "Found %d docs with status=claude_batch_queued (concurrency=%d)",
+            len(docs),
+            concurrency,
+        )
 
         by_batch: dict[str, list[tuple[str, object]]] = defaultdict(list)
         for content_id, doc in docs:
@@ -119,7 +128,10 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                         continue
                     results_by_custom_id[item.custom_id] = result.message
 
-                for content_id, doc in batch_docs:
+                async def apply_one(
+                    content_doc: tuple[str, object],
+                ) -> tuple[str, ArticleCost | None, dict | None]:
+                    content_id, doc = content_doc
                     page_url = doc.page_url
                     message = results_by_custom_id.get(content_id)
                     if message is None:
@@ -130,8 +142,7 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                             page_url,
                             task_id,
                         )
-                        errors += 1
-                        continue
+                        return "error", None, None
 
                     try:
                         chunks = await chunks_repo.list_by_page_url(page_url)
@@ -150,18 +161,13 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                         await service.apply_tag_results(page_url, results)
 
                         claude_usd = usd_for_model(tagger.model, usage, batch=True)
-                        batch_cost_rows.append(
-                            ArticleCost(page_url=page_url, claude_usd=claude_usd)
+                        cost_row = ArticleCost(page_url=page_url, claude_usd=claude_usd)
+                        token_row = token_usage_message_record(
+                            page_url=page_url,
+                            content_id=content_id,
+                            usage=usage,
+                            claude_usd=claude_usd,
                         )
-                        batch_token_rows.append(
-                            token_usage_message_record(
-                                page_url=page_url,
-                                content_id=content_id,
-                                usage=usage,
-                                claude_usd=claude_usd,
-                            )
-                        )
-                        applied += 1
                         log_pretty("Applied batch tags", {
                             "page_url": page_url,
                             "content_id": content_id,
@@ -175,17 +181,29 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
                             ),
                             "cache_read_input_tokens": usage.cache_read_input_tokens,
                         })
+                        return "applied", cost_row, token_row
                     except TaggingError:
                         logger.exception(
                             "Failed to parse tags for page_url=%s",
                             page_url,
                         )
-                        errors += 1
+                        return "error", None, None
                     except Exception:
                         logger.exception(
                             "Failed to apply batch for page_url=%s",
                             page_url,
                         )
+                        return "error", None, None
+
+                outcomes = await map_concurrent(batch_docs, concurrency, apply_one)
+                for status, cost_row, token_row in outcomes:
+                    if status == "applied":
+                        applied += 1
+                        if cost_row is not None:
+                            batch_cost_rows.append(cost_row)
+                        if token_row is not None:
+                            batch_token_rows.append(token_row)
+                    else:
                         errors += 1
 
                 if batch_cost_rows:
@@ -218,8 +236,20 @@ async def fetch_and_apply_batch_tags() -> tuple[int, int, int]:
 
 def main() -> None:
     setup_logging()
+    parser = argparse.ArgumentParser(
+        description="Fetch ended Claude tagging batches and apply results to Mongo",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Max pages to apply in parallel per batch (default: 1)",
+    )
+    args = parser.parse_args()
     try:
-        applied, skipped, errors = asyncio.run(fetch_and_apply_batch_tags())
+        applied, skipped, errors = asyncio.run(
+            fetch_and_apply_batch_tags(concurrency=args.concurrency)
+        )
         log_pretty("Done", {
             "applied": applied,
             "skipped": skipped,

@@ -9,15 +9,23 @@
 
 PAGE_URLS: list[dict[str, str | None]] = [
     {
-        "page_url": "https://www.partypacks.co.uk/blogs/party-inspiration/top-10-wedding-favour-ideas-diy-wedding-favours-plus-ideas-for-low-cost-wedding-favour-gift-boxes-bags",
-        "page_title": "Top 10 Wedding Favour Ideas - DIY Wedding Favours Plus Ideas For Low Cost Wedding Favour Gift Boxes Bags - Party Packs",
+        "page_url": "https://www.partypacks.co.uk/blogs/party-inspiration/throw-1920s-gatsby-themed-party",
+        "page_title": "Throw a 1920s Gatsby themed party – Party Packs",
     },
     {
-        "page_url": "https://thehenplanner.co.uk/blogs/blog/liverpool-hen-party-ideas",
-        "page_title": "Things To Do in Liverpool For a Hen Party!",
+        "page_url": "https://www.bonjourfete.com/blogs/le-blog/how-to-host-a-classic-christmas-party-tablescape-decor-ideas",
+        "page_title": "how to host a classic christmas party: tablescape & decor ...",
     },
     {
-        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/bachelorette-party-checklist",
-        "page_title": "Bachelorette Party Checklist",
+        "page_url": "https://www.bonjourfete.com/blogs/le-blog/how-to-host-a-video-game-birthday-party",
+        "page_title": "How to Host a Video Game Birthday Party",
+    },
+    {
+        "page_url": "https://thepartydarling.com/blogs/the-party-darling-blog/outer-space-party",
+        "page_title": "Outer Space Birthday Party Ideas",
+    },
+    {
+        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/10-best-bachelorette-party-trends",
+        "page_title": "10 Best Bachelorette Party Trends of 2026",
     },
 ]

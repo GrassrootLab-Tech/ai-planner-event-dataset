@@ -93,8 +93,10 @@ class ChunkTaggingService:
             raise ValueError("No tagging requests to submit")
 
         batch_id = await self._tagger.submit_batch(collector.requests)
-        for page_url in collector.page_urls:
-            await self._content_repo.set_claude_batch_queued(page_url, batch_id)
+        await asyncio.gather(*[
+            self._content_repo.set_claude_batch_queued(page_url, batch_id)
+            for page_url in collector.page_urls
+        ])
 
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         path = append_claude_batch_id(

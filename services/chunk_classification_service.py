@@ -1,3 +1,5 @@
+import asyncio
+
 from clients.anthropic_classifier_client import AnthropicClassifierClient
 from db.event_scraped_chunks_repo import EventScrapedChunksRepository
 from db.event_scraped_content_repo import EventScrapedContentRepository
@@ -41,8 +43,10 @@ class ChunkClassificationService:
         ]
         results, usage = await self._classifier.classify_article(chunk_inputs)
 
-        for (chunk_id, _), is_usable in zip(chunks, results):
-            await self._chunks_repo.update_is_usable(chunk_id, is_usable)
+        await asyncio.gather(*[
+            self._chunks_repo.update_is_usable(chunk_id, is_usable)
+            for (chunk_id, _), is_usable in zip(chunks, results)
+        ])
 
         await self._content_repo.update_status(page_url, "usability_classification")
 

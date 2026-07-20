@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from services.chunk_tagging_service import ChunkTaggingService, TagBatchCollecto
 from services.chunking_service import ChunkingService
 from services.event_scraper_service import EventScraperService
 from retrieval import populate_tag_index
+from utils.concurrency import map_concurrent
 from utils.logger import COMMAND_LOG_STAGES, log_pretty, logger, set_log_stage, setup_logging
 from utils.pipeline_cost import (
     article_cost_from_steps,
@@ -146,6 +147,15 @@ def _add_skip_limit_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="Process at most N URLs after --skip (default: all remaining)",
+    )
+
+
+def _add_concurrency_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Max URLs to process in parallel (default: 1)",
     )
 
 
@@ -404,6 +414,7 @@ class PipelineContext:
     anonymizer_service: ChunkAnonymizationService
     embedding_service: ChunkEmbeddingService
     tag_collector: TagBatchCollector | None = None
+    tag_collector_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @classmethod
     async def create(cls, *, cache: bool = False) -> PipelineContext:
@@ -529,7 +540,8 @@ async def _execute_pipeline_step(
             if prepared is None:
                 return 0, {"claude_usd": 0.0}
             prepared_url, request, usable_count = prepared
-            ctx.tag_collector.add(prepared_url, request)
+            async with ctx.tag_collector_lock:
+                ctx.tag_collector.add(prepared_url, request)
             return usable_count, {"claude_usd": 0.0}
         return await ctx.tagger_service.tag_and_store(
             page_url,
@@ -786,20 +798,32 @@ async def run_all_sample(
     skip: int = 0,
     limit: int | None = None,
     cache: bool = False,
+    concurrency: int = 1,
 ) -> tuple[list[dict[str, Any]], Path, Path]:
     pages, source_name = load_batch_pages(json_path, skip=skip, limit=limit)
     if not pages:
         raise ValueError(f"No URLs to process in {source_name} (after skip/limit)")
+    if concurrency < 1:
+        raise ValueError("--concurrency must be >= 1")
 
     started_at_dt = datetime.now(timezone.utc)
     started_at = started_at_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
     cost_path = cost_report_path_for_run(started_at_dt)
-    results: list[dict[str, Any]] = []
+    results: list[dict[str, Any] | None] = [None] * len(pages)
+    results_lock = asyncio.Lock()
 
     ctx = await PipelineContext.create(cache=cache)
     ctx.tag_collector = TagBatchCollector()
     try:
-        for index, entry in enumerate(pages, start=1):
+        logger.info(
+            "Processing %d URLs from %s (concurrency=%d)",
+            len(pages),
+            source_name,
+            concurrency,
+        )
+
+        async def process_one(index_entry: tuple[int, dict[str, str | None]]) -> dict[str, Any]:
+            index, entry = index_entry
             page_url = str(entry["url"])
             page_title = entry.get("page_title")
             if isinstance(page_title, str):
@@ -808,32 +832,43 @@ async def run_all_sample(
                 page_title = None
             logger.info(
                 "Processing URL %d/%d from %s",
-                index,
+                index + 1,
                 len(pages),
                 source_name,
             )
-            results.append(await run_pipeline_report(
+            report = await run_pipeline_report(
                 page_url,
                 ctx,
                 page_title=page_title,
-            ))
-            write_batch_report(results, started_at)
-            write_cost_report([report["cost"] for report in results], cost_path)
+            )
+            async with results_lock:
+                results[index] = report
+                completed = [r for r in results if r is not None]
+                write_batch_report(completed, started_at)
+                write_cost_report([r["cost"] for r in completed], cost_path)
+            return report
+
+        await map_concurrent(
+            list(enumerate(pages)),
+            concurrency,
+            process_one,
+        )
+        final_results = [r for r in results if r is not None]
 
         if ctx.tag_collector:
             batch_id = await ctx.tagger_service.submit_collected_batch(ctx.tag_collector)
             logger.info("Submitted shared tagging batch id=%s", batch_id)
             final_cost_path = cost_report_path_for_run(started_at_dt, batch_id=batch_id)
-            write_cost_report([report["cost"] for report in results], final_cost_path)
+            write_cost_report([report["cost"] for report in final_results], final_cost_path)
             if cost_path != final_cost_path and cost_path.exists():
                 cost_path.unlink()
             cost_path = final_cost_path
     finally:
         await ctx.close()
 
-    report_path = write_batch_report(results, started_at)
-    write_cost_report([report["cost"] for report in results], cost_path)
-    return results, report_path, cost_path
+    report_path = write_batch_report(final_results, started_at)
+    write_cost_report([report["cost"] for report in final_results], cost_path)
+    return final_results, report_path, cost_path
 
 
 def format_stage_batch_report(
@@ -887,6 +922,7 @@ async def run_stage_batch(
     skip: int = 0,
     limit: int | None = None,
     cache: bool = False,
+    concurrency: int = 1,
 ) -> tuple[list[dict[str, Any]], Path]:
     if stage not in STAGE_CHOICES:
         raise ValueError(f"Unknown stage {stage!r}; choose from {STAGE_CHOICES}")
@@ -894,15 +930,27 @@ async def run_stage_batch(
     pages, source_name = load_batch_pages(json_path, skip=skip, limit=limit)
     if not pages:
         raise ValueError(f"No URLs to process in {source_name} (after skip/limit)")
+    if concurrency < 1:
+        raise ValueError("--concurrency must be >= 1")
 
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    results: list[dict[str, Any]] = []
+    results: list[dict[str, Any] | None] = [None] * len(pages)
+    results_lock = asyncio.Lock()
 
     ctx = await PipelineContext.create(cache=cache)
     if stage == "tag":
         ctx.tag_collector = TagBatchCollector()
     try:
-        for index, entry in enumerate(pages, start=1):
+        logger.info(
+            "Stage %s: %d URLs from %s (concurrency=%d)",
+            stage,
+            len(pages),
+            source_name,
+            concurrency,
+        )
+
+        async def process_one(index_entry: tuple[int, dict[str, str | None]]) -> dict[str, Any]:
+            index, entry = index_entry
             page_url = str(entry["url"])
             page_title = entry.get("page_title")
             if isinstance(page_title, str):
@@ -913,7 +961,7 @@ async def run_stage_batch(
             logger.info(
                 "Stage %s URL %d/%d from %s",
                 stage,
-                index,
+                index + 1,
                 len(pages),
                 source_name,
             )
@@ -931,42 +979,56 @@ async def run_stage_batch(
                     if page_url in ctx.tag_collector.page_urls:
                         status = "claude_batch_queued"
                         message = "queued for shared Claude batch"
-                results.append({
+                report = {
                     "page_url": page_url,
                     "status": status,
                     "message": message,
                     "result": result,
-                })
+                }
             except PipelineSkip as skip_exc:
                 logger.warning("%s skipped for %s: %s", stage, page_url, skip_exc.message)
-                results.append({
+                report = {
                     "page_url": page_url,
                     "status": "skipped",
                     "message": skip_exc.message,
                     "result": None,
-                })
+                }
             except Exception as exc:
                 logger.exception("%s failed for page_url=%s", stage, page_url)
-                results.append({
+                report = {
                     "page_url": page_url,
                     "status": "failed",
                     "message": str(exc),
                     "result": None,
-                })
+                }
 
-            write_stage_batch_report(stage, results, started_at)
+            async with results_lock:
+                results[index] = report
+                write_stage_batch_report(
+                    stage,
+                    [r for r in results if r is not None],
+                    started_at,
+                )
+            return report
+
+        await map_concurrent(
+            list(enumerate(pages)),
+            concurrency,
+            process_one,
+        )
+        final_results = [r for r in results if r is not None]
 
         if stage == "tag" and ctx.tag_collector and ctx.tag_collector.page_urls:
             batch_id = await ctx.tagger_service.submit_collected_batch(ctx.tag_collector)
             logger.info("Submitted shared tagging batch id=%s", batch_id)
-            for report in results:
+            for report in final_results:
                 if report["status"] == "claude_batch_queued":
                     report["message"] = f"submitted Claude batch id={batch_id}"
     finally:
         await ctx.close()
 
-    report_path = write_stage_batch_report(stage, results, started_at)
-    return results, report_path
+    report_path = write_stage_batch_report(stage, final_results, started_at)
+    return final_results, report_path
 
 
 def main() -> None:
@@ -1050,6 +1112,7 @@ def main() -> None:
         ),
     )
     _add_skip_limit_args(run_all_sample_parser)
+    _add_concurrency_arg(run_all_sample_parser)
     run_all_sample_parser.add_argument(
         "--cache",
         action="store_true",
@@ -1079,6 +1142,7 @@ def main() -> None:
         ),
     )
     _add_skip_limit_args(run_stage_batch_parser)
+    _add_concurrency_arg(run_stage_batch_parser)
     run_stage_batch_parser.add_argument(
         "--cache",
         action="store_true",
@@ -1135,6 +1199,7 @@ def main() -> None:
                     skip=args.skip,
                     limit=args.limit,
                     cache=args.cache,
+                    concurrency=args.concurrency,
                 )
             )
             failed_count = sum(1 for report in results if report["status"] == "failed")
@@ -1154,6 +1219,7 @@ def main() -> None:
                     skip=args.skip,
                     limit=args.limit,
                     cache=args.cache,
+                    concurrency=args.concurrency,
                 )
             )
             failed_count = sum(1 for report in results if report["status"] == "failed")
