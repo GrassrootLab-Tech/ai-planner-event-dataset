@@ -8,8 +8,22 @@ st.set_page_config(
 st.title("AI Planner Retrieval")
 st.write(
     "Compare two ways to retrieve party-planning idea chunks, "
-    "or try the theme recommendation POC. "
+    "or try the theme recommendation and spark ideas POCs. "
     "Pick an approach from the sidebar."
+)
+
+st.subheader("Spark ideas POC")
+st.markdown(
+    """
+- Fill the event form (**event_type** required)
+- **No Stage-1 LLM** — fixed query from `event_type` (+ celebratee if set)
+- Pinecone filter: **AND** `event_type` + **OR** (`statement_piece`, `photo_moment_flag`, `personalization_element`)
+- Search `ai-planner-dataset` for matching spark chunks
+- Haiku writes up to **7** conversational spark ideas inspired by the chunks
+- Embed each idea with **Gemini** → query `image-index-v2`
+- Return up to **7** ideas with images
+- Find the associated vendor in the mongodb related to the image
+"""
 )
 
 st.subheader("Theme recommendation POC")
@@ -55,6 +69,6 @@ st.markdown(
 )
 
 st.info(
-    "Open **metadata_filter_approach**, **reranking_approach**, or "
-    "**theme_recommendation** from the sidebar."
+    "Open **metadata_filter_approach**, **reranking_approach**, "
+    "**theme_recommendation**, or **spark_ideas** from the sidebar."
 )
