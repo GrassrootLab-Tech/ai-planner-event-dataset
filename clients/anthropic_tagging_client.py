@@ -10,7 +10,7 @@ from utils.logger import log_pretty, logger
 from utils.pipeline_cost import TokenUsage
 
 TOOL_NAME = "submit_tags"
-MAX_TOKENS = 32_000
+MAX_TOKENS = 45_000
 CACHE_TTL = "1h"
 _TOOL_DESCRIPTION = (
     "Submit tagging results for every chunk_index. "

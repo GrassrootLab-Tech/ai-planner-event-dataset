@@ -7,8 +7,23 @@ st.set_page_config(
 
 st.title("AI Planner Retrieval")
 st.write(
-    "Compare two ways to retrieve party-planning idea chunks. "
+    "Compare two ways to retrieve party-planning idea chunks, "
+    "or try the theme recommendation POC. "
     "Pick an approach from the sidebar."
+)
+
+st.subheader("Theme recommendation POC")
+st.markdown(
+    """
+- Fill the event form (**event_type** required; empty fields skip their tags)
+- Haiku maps answers → filter tags + a short search query
+- Pinecone filter: **AND** (`content_category`, `idea_granularity`, `event_type`) + **OR** (tags inferred from user input ,only a limited set of tags are used because input fields are also limited)
+- Search `ai-planner-dataset` for matching theme chunks
+- Haiku writes up to **6** themes as `title : description`
+- Embed each theme with **Gemini** → query `image-index-v2`
+- Return up to **6** themes with images
+- Find the associated vendor in the mongodb related to the image
+"""
 )
 
 st.subheader("Metadata filter approach")
@@ -39,4 +54,7 @@ st.markdown(
 """
 )
 
-st.info("Open **metadata_filter_approach** or **reranking_approach** from the sidebar to try either path.")
+st.info(
+    "Open **metadata_filter_approach**, **reranking_approach**, or "
+    "**theme_recommendation** from the sidebar."
+)
