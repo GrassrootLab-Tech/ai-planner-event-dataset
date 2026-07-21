@@ -19,9 +19,9 @@ st.markdown(
 - Haiku maps answers → filter tags + a short search query
 - Pinecone filter: **AND** (`content_category`, `idea_granularity`, `event_type`) + **OR** (tags inferred from user input ,only a limited set of tags are used because input fields are also limited)
 - Search `ai-planner-dataset` for matching theme chunks
-- Haiku writes up to **6** themes as `title : description`
+- Haiku writes up to **7** themes as `title : description`
 - Embed each theme with **Gemini** → query `image-index-v2`
-- Return up to **6** themes with images
+- Return up to **7** themes with images
 - Find the associated vendor in the mongodb related to the image
 """
 )

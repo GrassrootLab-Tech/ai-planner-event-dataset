@@ -26,7 +26,7 @@ from theme_recommendation.haiku import (
 from theme_recommendation.vendors import fetch_vendors_by_ids
 from utils.logger import log_pretty
 
-THEME_DISPLAY_COUNT = 6
+THEME_DISPLAY_COUNT = 7
 IMAGE_PROBE_TIMEOUT_S = 5.0
 
 

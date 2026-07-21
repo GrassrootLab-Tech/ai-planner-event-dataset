@@ -9,7 +9,7 @@ from clients.openai_embedding_client import OpenAIEmbeddingClient
 from clients.pinecone_client import PineconeClient
 from config import Settings
 from db.mongo import Mongo
-from streamlit_ui import run_async
+from streamlit_ui import extract_chunk_tags, run_async
 from theme_recommendation.constants import (
     BUDGET_OPTIONS,
     SERVICE_TYPE_OPTIONS,
@@ -33,7 +33,7 @@ st.markdown(
 - Haiku maps answers → filter enums + a short search query
 - Pinecone filter: **AND** (`content_category`, `idea_granularity`, `event_type`) + **OR** (other tags, `photo_moment_flag`)
 - Search `ai-planner-dataset` for matching theme chunks
-- Haiku writes up to **6** themes as `title : description`
+- Haiku writes up to **7** themes as `title : description`
 - Embed each theme with **Gemini** → query `image-index-v2`
 - Keep only themes whose image URL is reachable (1-byte check)
 - Look up `vendor_id` in MongoDB `vendors` → show business name under the image
@@ -180,6 +180,12 @@ if st.button("Recommend themes", type="primary"):
                         f'{match.get("chunk") or "_(empty)_"}</p>',
                         unsafe_allow_html=True,
                     )
+                    tags = extract_chunk_tags(match.get("metadata") or {})
+                    with st.expander(f"Tags ({len(tags)})", expanded=False):
+                        if tags:
+                            st.json(tags)
+                        else:
+                            st.caption("No tags in metadata.")
 
         with st.expander("Stage 2 LLM output", expanded=False):
             st.json(
