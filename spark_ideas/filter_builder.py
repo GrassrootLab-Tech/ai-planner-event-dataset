@@ -4,32 +4,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from tags.registry import TagRegistry
 
-_SENTINEL = "not_applicable"
+def _field_exists(tag_name: str) -> dict[str, Any]:
+    """Match when the tag is present.
 
-
-def _has_real_value_clause(tag_name: str, registry: TagRegistry) -> dict[str, Any]:
-    """Match when the tag has a real enum value (excludes not_applicable and empty lists).
-
-    Pinecone `$ne` only accepts string/bool/number — not `[]` — so we use `$in`
-    over allowed values instead.
+    Sentinel / empty values are omitted at upsert time, so existence == real value.
     """
-    tag = registry.get(tag_name)
-    allowed = [v for v in (tag.values or ()) if v != _SENTINEL]
-    return {tag_name: {"$in": allowed}}
+    return {tag_name: {"$exists": True}}
 
 
 def build_spark_pinecone_filter(event_type: str) -> dict[str, Any]:
-    registry = TagRegistry()
     return {
         "$and": [
             {"event_type": {"$eq": event_type.strip()}},
             {
                 "$or": [
-                    _has_real_value_clause("statement_piece", registry),
+                    _field_exists("statement_piece"),
                     {"photo_moment_flag": {"$eq": True}},
-                    _has_real_value_clause("personalization_element", registry),
+                    _field_exists("personalization_element"),
                 ]
             },
         ]

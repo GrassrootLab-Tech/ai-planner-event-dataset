@@ -32,9 +32,9 @@ st.markdown(
 - Fill the event form (**event_type** required)
 - **No Stage-1 LLM** — fixed embedding query from `event_type` (+ celebratee if set)
 - Pinecone filter: **AND** `event_type` + **OR** of these three spark signals:
-  - **statement_piece** — hero attraction (bounce house, photo booth, flower wall, …), not empty / `not_applicable`
-  - **photo_moment_flag** — strong photo opportunity (backdrop, neon, cake smash, …)
-  - **personalization_element** — honoree personalization (name in lights, memory board, …), not empty / `not_applicable`
+  - **statement_piece** — field `$exists` (sentinels / empty lists are not stored)
+  - **photo_moment_flag** — `$eq` true (strong photo opportunity)
+  - **personalization_element** — field `$exists` (sentinels / empty lists are not stored)
 - Search `ai-planner-dataset` for top **7** matching chunks
 - Haiku writes **7** numbered conversational spark ideas (inspired by the chunks)
 - Embed each idea with **Gemini** → query `image-index-v2`

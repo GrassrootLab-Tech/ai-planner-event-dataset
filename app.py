@@ -70,5 +70,5 @@ st.markdown(
 
 st.info(
     "Open **metadata_filter_approach**, **reranking_approach**, "
-    "**theme_recommendation**, or **spark_ideas** from the sidebar."
+    "**theme_recommendation_v1_anurag**, or **spark_ideas** from the sidebar."
 )

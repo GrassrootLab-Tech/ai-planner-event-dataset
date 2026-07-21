@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from models.event_scraped_chunk import EventScrapedChunk
+from tags.order import SCALAR_LIST_VALUES
 
 
 def _pinecone_safe_value(value: Any) -> Any:
@@ -25,6 +26,26 @@ def _pinecone_safe_value(value: Any) -> Any:
     return str(value)
 
 
+def _should_omit_tag_value(value: Any) -> bool:
+    """Omit sentinel strings, empty lists, and lists that only contain sentinels."""
+    if value is None or value == "":
+        return True
+    if isinstance(value, str) and value in SCALAR_LIST_VALUES:
+        return True
+    if isinstance(value, list) and (
+        not value or all(item in SCALAR_LIST_VALUES for item in value)
+    ):
+        return True
+    return False
+
+
+def _clean_tag_value(value: Any) -> Any:
+    """Strip sentinel items from string lists; return other values unchanged."""
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return [item for item in value if item and item not in SCALAR_LIST_VALUES]
+    return value
+
+
 def build_pinecone_metadata(
     chunk_doc: EventScrapedChunk,
     *,
@@ -40,6 +61,9 @@ def build_pinecone_metadata(
 
     if chunk_doc.metadata_tags:
         for key, value in chunk_doc.metadata_tags.items():
-            metadata[key] = _pinecone_safe_value(value)
+            cleaned = _clean_tag_value(value)
+            if _should_omit_tag_value(cleaned):
+                continue
+            metadata[key] = _pinecone_safe_value(cleaned)
 
     return metadata
