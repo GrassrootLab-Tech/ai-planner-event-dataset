@@ -9,23 +9,23 @@
 
 PAGE_URLS: list[dict[str, str | None]] = [
     {
-        "page_url": "https://www.partypacks.co.uk/blogs/party-inspiration/throw-1920s-gatsby-themed-party",
-        "page_title": "Throw a 1920s Gatsby themed party – Party Packs",
+        "page_url": "https://www.classpop.com/magazine/birthday-party-ideas-in-atlanta",
+        "page_title": "Birthday Party Ideas in Atlanta: 35 Fun Venues & Places to ...",
     },
     {
-        "page_url": "https://www.bonjourfete.com/blogs/le-blog/how-to-host-a-classic-christmas-party-tablescape-decor-ideas",
-        "page_title": "how to host a classic christmas party: tablescape & decor ...",
+        "page_url": "https://www.playpartyplan.com/stocking-stuffers-for-men",
+        "page_title": "25 Unique Stocking Stuffers for Men Under $10",
     },
     {
-        "page_url": "https://www.bonjourfete.com/blogs/le-blog/how-to-host-a-video-game-birthday-party",
-        "page_title": "How to Host a Video Game Birthday Party",
+        "page_url": "https://www.thebash.com/articles/bachelorette-party-theme-ideas",
+        "page_title": "60 Trendy Bachelorette Party Theme Ideas",
     },
     {
-        "page_url": "https://thepartydarling.com/blogs/the-party-darling-blog/outer-space-party",
-        "page_title": "Outer Space Birthday Party Ideas",
+        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/101-bachelorette-party-ideas",
+        "page_title": "101 Bachelorette Party Ideas in 2026",
     },
     {
-        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/10-best-bachelorette-party-trends",
-        "page_title": "10 Best Bachelorette Party Trends of 2026",
+        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/60-out-of-the-box-bachelorette-party-ideas-you-wont-believe",
+        "page_title": "60+ Out-of-the-Box Bachelorette Party Ideas You Won't ...",
     },
 ]
