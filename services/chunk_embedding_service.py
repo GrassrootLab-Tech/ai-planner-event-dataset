@@ -27,8 +27,8 @@ class ChunkEmbeddingService:
         *,
         skip_status_check: bool = False,
     ) -> tuple[int, dict[str, float]]:
+        doc = await self._content_repo.get_by_page_url(page_url)
         if not skip_status_check:
-            doc = await self._content_repo.get_by_page_url(page_url)
             check_step(
                 status=doc.status if doc else None,
                 required="anonymized",
@@ -49,6 +49,7 @@ class ChunkEmbeddingService:
 
         texts = [chunk_doc.chunk for _, chunk_doc in usable_chunks]
         embeddings, usage = await self._embedder.embed_texts(texts)
+        page_title = doc.page_title if doc else None
 
         vectors = [
             {
@@ -57,6 +58,7 @@ class ChunkEmbeddingService:
                 "metadata": build_pinecone_metadata(
                     chunk_doc,
                     embedding_model=self._embedder.model,
+                    page_title=page_title,
                 ),
             }
             for (chunk_id, chunk_doc), embedding in zip(usable_chunks, embeddings)

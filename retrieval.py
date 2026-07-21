@@ -25,6 +25,7 @@ CONTENT_METADATA_KEYS = frozenset(
     {
         "chunk",
         "page_url",
+        "page_title",
         "parent_section_heading",
         "scraped_at",
         "embedding_model",

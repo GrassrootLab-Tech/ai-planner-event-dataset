@@ -50,6 +50,7 @@ def build_pinecone_metadata(
     chunk_doc: EventScrapedChunk,
     *,
     embedding_model: str,
+    page_title: str | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "chunk": chunk_doc.chunk,
@@ -58,6 +59,8 @@ def build_pinecone_metadata(
         "scraped_at": _pinecone_safe_value(chunk_doc.scraped_at),
         "embedding_model": embedding_model,
     }
+    if page_title and page_title.strip():
+        metadata["page_title"] = page_title.strip()
 
     if chunk_doc.metadata_tags:
         for key, value in chunk_doc.metadata_tags.items():
