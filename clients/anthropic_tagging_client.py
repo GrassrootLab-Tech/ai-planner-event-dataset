@@ -1,3 +1,6 @@
+import json
+from typing import Any
+
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
@@ -107,9 +110,10 @@ class AnthropicTaggingClient:
     ) -> tuple[list[dict[str, TagValue]], TokenUsage, dict]:
         usage = TokenUsage.from_anthropic(getattr(message, "usage", None))
         tool_input = self.extract_tool_input(message)
+        normalized = self.normalize_tool_input(tool_input)
         response_model = build_result_model(tags)
-        parsed = response_model.model_validate(tool_input)
-        return self.map_results(parsed, chunk_count, tags), usage, tool_input
+        parsed = response_model.model_validate(normalized)
+        return self.map_results(parsed, chunk_count, tags), usage, normalized
 
     def _system_param(self, system_prompt: str) -> str | list[dict]:
         if not self._cache:
@@ -155,6 +159,37 @@ class AnthropicTaggingClient:
                     raise TaggingError("Anthropic tool_use input is not an object")
                 return tool_input
         raise TaggingError("Anthropic returned no submit_tags tool_use block")
+
+    @staticmethod
+    def normalize_tool_input(tool_input: dict) -> dict:
+        """Coerce common malformed tool payloads without changing valid ones."""
+        data = dict(tool_input)
+        chunks = data.get("chunks")
+        if isinstance(chunks, str):
+            data["chunks"] = AnthropicTaggingClient._parse_chunks_json(chunks)
+        return data
+
+    @staticmethod
+    def _parse_chunks_json(raw: str) -> list[Any]:
+        text = raw.strip()
+        try:
+            parsed: Any = json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("[")
+            end = text.rfind("]")
+            if start == -1 or end == -1 or end <= start:
+                raise TaggingError(
+                    "Anthropic tool_use chunks is a non-JSON string"
+                ) from None
+            try:
+                parsed = json.loads(text[start : end + 1])
+            except json.JSONDecodeError as exc:
+                raise TaggingError(
+                    "Anthropic tool_use chunks string could not be parsed as JSON"
+                ) from exc
+        if not isinstance(parsed, list):
+            raise TaggingError("Anthropic tool_use chunks JSON is not a list")
+        return parsed
 
     @staticmethod
     def map_results(

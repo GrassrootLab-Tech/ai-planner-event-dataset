@@ -14,8 +14,9 @@ def _as_list(value: Any) -> Any:
 
 
 def _as_str(value: Any) -> Any:
-    if isinstance(value, list) and value:
-        return value[0]
+    # Models sometimes return [] for "unclassified" single/text tags.
+    if isinstance(value, list):
+        return value[0] if value else None
     return value
 
 
@@ -28,6 +29,7 @@ def field_type_for_tag(tag: TagDefinition) -> Any:
         case "bool":
             return bool
         case "text" | "single":
-            return Annotated[str, BeforeValidator(_as_str)]
+            # Optional so empty-list → None from _as_str validates cleanly.
+            return Annotated[str | None, BeforeValidator(_as_str)]
         case "multi":
             return Annotated[list[str], BeforeValidator(_as_list)]

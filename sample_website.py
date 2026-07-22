@@ -9,23 +9,15 @@
 
 PAGE_URLS: list[dict[str, str | None]] = [
     {
-        "page_url": "https://www.classpop.com/magazine/birthday-party-ideas-in-atlanta",
-        "page_title": "Birthday Party Ideas in Atlanta: 35 Fun Venues & Places to ...",
+        "page_url": "https://thecreativeheartstudio.com/blogs/projects/unicorn-kisses-and-rainbow-wishes",
+        "page_title": "Unicorn Kisses and Rainbow Wishes",
     },
     {
-        "page_url": "https://www.playpartyplan.com/stocking-stuffers-for-men",
-        "page_title": "25 Unique Stocking Stuffers for Men Under $10",
+        "page_url": "https://www.catchmyparty.com/parties/6th-birthday",
+        "page_title": 'Cops & Robbers / Birthday "6th Birthday"',
     },
     {
-        "page_url": "https://www.thebash.com/articles/bachelorette-party-theme-ideas",
-        "page_title": "60 Trendy Bachelorette Party Theme Ideas",
-    },
-    {
-        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/101-bachelorette-party-ideas",
-        "page_title": "101 Bachelorette Party Ideas in 2026",
-    },
-    {
-        "page_url": "https://www.thehouseofbachelorette.com/blogs/bachelorette-ideas/60-out-of-the-box-bachelorette-party-ideas-you-wont-believe",
-        "page_title": "60+ Out-of-the-Box Bachelorette Party Ideas You Won't ...",
+        "page_url": "https://www.ruffledblog.com/brisbane-high-tea-wedding",
+        "page_title": "Brisbane High Tea Wedding",
     },
 ]
