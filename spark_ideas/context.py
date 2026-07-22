@@ -1,8 +1,7 @@
-"""Form summary + fixed embedding query for spark ideas."""
+"""Form summary + embedding query for spark ideas."""
 
 from __future__ import annotations
 
-from theme_recommendation.constants import ThemeFormInput
 from theme_recommendation.context import form_summary_for_prompt
 
 __all__ = ["form_summary_for_prompt", "build_spark_query"]
@@ -14,11 +13,14 @@ _QUERY_BASE = (
 )
 
 
-def build_spark_query(form: ThemeFormInput) -> str:
-    """Fixed embedding query; append celebratee only when filled."""
-    event_type = form.event_type.strip()
-    base = _QUERY_BASE.format(event_type=event_type)
-    celebratee = (form.celebratee or "").strip()
-    if celebratee:
-        return f"{base}, for a {celebratee}."
+def build_spark_query(
+    *,
+    event_type: str,
+    celebratee: str | None = None,
+) -> str:
+    """Embedding query using Stage1 event_type enum; append celebratee when filled."""
+    base = _QUERY_BASE.format(event_type=event_type.strip())
+    celebratee_clean = (celebratee or "").strip()
+    if celebratee_clean:
+        return f"{base}, for a {celebratee_clean}."
     return f"{base}."

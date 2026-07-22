@@ -10,6 +10,7 @@ import streamlit as st
 
 from retrieval import RetrievalResult
 from tags.order import METADATA_TAG_ORDER, SCALAR_LIST_VALUES
+from utils.pipeline_cost import TokenUsage, usd_for_model
 
 T = TypeVar("T")
 
@@ -25,6 +26,32 @@ CONTENT_METADATA_KEYS = frozenset({
 
 def run_async(coro: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(coro)
+
+
+def render_claude_cost(
+    model: str,
+    *,
+    stages: dict[str, TokenUsage],
+) -> None:
+    """Show per-stage Claude tokens/cost, then a summed total."""
+    st.subheader("Claude cost")
+    total = TokenUsage()
+    for label, usage in stages.items():
+        total = total + usage
+        cost_usd = usd_for_model(model, usage)
+        st.markdown(f"**{label}**")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Input tokens", f"{usage.input_tokens:,}")
+        col2.metric("Output tokens", f"{usage.output_tokens:,}")
+        col3.metric("Cost", f"${cost_usd:.6f}")
+
+    if len(stages) > 1:
+        total_usd = usd_for_model(model, total)
+        st.markdown("**Total**")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Input tokens", f"{total.input_tokens:,}")
+        col2.metric("Output tokens", f"{total.output_tokens:,}")
+        col3.metric("Cost", f"${total_usd:.6f}")
 
 
 def extract_chunk_tags(metadata: dict[str, Any]) -> dict[str, Any]:

@@ -25,6 +25,8 @@ from theme_recommendation.haiku import (
 )
 from theme_recommendation.vendors import fetch_vendors_by_ids
 from utils.logger import log_pretty
+from utils.pipeline_cost import TokenUsage
+
 
 THEME_DISPLAY_COUNT = 7
 IMAGE_PROBE_TIMEOUT_S = 5.0
@@ -49,6 +51,12 @@ class ThemeRecommendationResult:
     chunk_matches: list[dict[str, Any]] = field(default_factory=list)
     stage2_themes: list[ThemeIdea] = field(default_factory=list)
     themes: list[ThemeWithImage] = field(default_factory=list)
+    stage1_usage: TokenUsage = field(default_factory=TokenUsage)
+    stage2_usage: TokenUsage = field(default_factory=TokenUsage)
+
+    @property
+    def usage(self) -> TokenUsage:
+        return self.stage1_usage + self.stage2_usage
 
 
 async def recommend_themes(
@@ -68,7 +76,7 @@ async def recommend_themes(
     form_summary = form_summary_for_prompt(form)
     tags = active_tag_definitions(form, registry)
 
-    stage1 = await infer_theme_filters(
+    stage1, stage1_usage = await infer_theme_filters(
         api_key=anthropic_api_key,
         model=anthropic_model,
         form_summary=form_summary,
@@ -94,7 +102,7 @@ async def recommend_themes(
     ]
     chunk_texts = [str(m["chunk"]) for m in chunk_matches]
 
-    theme_ideas = await synthesize_themes(
+    theme_ideas, stage2_usage = await synthesize_themes(
         api_key=anthropic_api_key,
         model=anthropic_model,
         form_summary=form_summary,
@@ -107,6 +115,7 @@ async def recommend_themes(
     if vendors_collection is not None:
         themes = await _attach_vendors(themes, vendors_collection)
 
+    usage = stage1_usage + stage2_usage
     log_pretty(
         "Theme recommendation completed",
         {
@@ -114,6 +123,12 @@ async def recommend_themes(
             "chunk_count": len(chunk_matches),
             "theme_count": len(themes),
             "filter": pinecone_filter,
+            "stage1_input_tokens": stage1_usage.input_tokens,
+            "stage1_output_tokens": stage1_usage.output_tokens,
+            "stage2_input_tokens": stage2_usage.input_tokens,
+            "stage2_output_tokens": stage2_usage.output_tokens,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
     return ThemeRecommendationResult(
@@ -122,6 +137,8 @@ async def recommend_themes(
         chunk_matches=chunk_matches,
         stage2_themes=theme_ideas,
         themes=themes,
+        stage1_usage=stage1_usage,
+        stage2_usage=stage2_usage,
     )
 
 

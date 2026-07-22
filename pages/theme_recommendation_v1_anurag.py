@@ -9,7 +9,7 @@ from clients.openai_embedding_client import OpenAIEmbeddingClient
 from clients.pinecone_client import PineconeClient
 from config import Settings
 from db.mongo import Mongo
-from streamlit_ui import extract_chunk_tags, run_async
+from streamlit_ui import extract_chunk_tags, render_claude_cost, run_async
 from theme_recommendation.constants import (
     BUDGET_OPTIONS,
     SERVICE_TYPE_OPTIONS,
@@ -140,6 +140,14 @@ if st.button("Recommend themes", type="primary"):
                     await mongo.disconnect()
 
             outcome = run_async(_run())
+
+        render_claude_cost(
+            settings.anthropic_query_tagging_model,
+            stages={
+                "Stage 1 (filters)": outcome.stage1_usage,
+                "Stage 2 (themes)": outcome.stage2_usage,
+            },
+        )
 
         with st.expander("Stage 1 LLM output", expanded=False):
             st.json(

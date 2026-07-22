@@ -8,6 +8,7 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 
 from utils.logger import log_pretty
+from utils.pipeline_cost import TokenUsage
 
 SPARK_TOOL = "submit_spark_ideas"
 MAX_TOKENS = 4096
@@ -50,7 +51,7 @@ async def synthesize_spark_ideas(
     form_summary: str,
     chunk_texts: list[str],
     top_k: int = 7,
-) -> list[SparkIdea]:
+) -> tuple[list[SparkIdea], TokenUsage]:
     client = AsyncAnthropic(api_key=api_key)
     sources = "\n\n".join(
         f"[{i}] {text.strip()}"
@@ -58,18 +59,14 @@ async def synthesize_spark_ideas(
         if text.strip()
     )
     if not sources:
-        sources = (
-            "(no retrieved chunks; invent plausible spark ideas from the form alone)"
-        )
+        sources = "(no retrieved chunks)"
 
     system = (
         "You suggest unique, mind-blowing “spark” ideas that make a party "
         "instantly memorable — statement pieces, photo moments, and "
         "personalization that add unexpected sparkle. "
         "Take inspiration from the retrieved source chunks: remix and adapt "
-        "what’s in them into fresh ideas for this form, rather than inventing "
-        "from scratch when sources are present. If there are no sources, invent "
-        "plausible ideas from the form alone. "
+        "what’s in them into fresh ideas for this form. "
         "Speak in a warm, conversational host-planner voice. "
         "Keep each idea to 1–2 short sentences. "
         "Do not mention sources, chunk numbers, or tags. "
@@ -102,12 +99,12 @@ async def synthesize_spark_ideas(
         tool_choice={"type": "tool", "name": SPARK_TOOL},
     )
 
-    usage = getattr(response, "usage", None)
+    usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
     log_pretty(
         "Spark ideas token usage",
         {
-            "input_tokens": getattr(usage, "input_tokens", None),
-            "output_tokens": getattr(usage, "output_tokens", None),
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
 
@@ -120,4 +117,4 @@ async def synthesize_spark_ideas(
     ]
     if not ideas:
         raise SparkIdeasError("Haiku returned no spark ideas")
-    return ideas[:top_k]
+    return ideas[:top_k], usage

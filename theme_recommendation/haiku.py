@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, create_model
 from tags.order import SCALAR_LIST_VALUES
 from tags.spec import TagDefinition
 from utils.logger import log_pretty
+from utils.pipeline_cost import TokenUsage
 
 STAGE1_TOOL = "submit_theme_filters"
 STAGE2_TOOL = "submit_themes"
@@ -168,7 +169,7 @@ async def infer_theme_filters(
     model: str,
     form_summary: str,
     tags: list[TagDefinition],
-) -> Stage1Result:
+) -> tuple[Stage1Result, TokenUsage]:
     if not tags:
         raise ThemeRecommendationError("No active tags for theme filter inference")
 
@@ -207,12 +208,12 @@ async def infer_theme_filters(
         tool_choice={"type": "tool", "name": STAGE1_TOOL},
     )
 
-    usage = getattr(response, "usage", None)
+    usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
     log_pretty(
         "Theme stage1 token usage",
         {
-            "input_tokens": getattr(usage, "input_tokens", None),
-            "output_tokens": getattr(usage, "output_tokens", None),
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
 
@@ -234,7 +235,7 @@ async def infer_theme_filters(
             "pinecone_query": result.pinecone_query,
         },
     )
-    return result
+    return result, usage
 
 
 class Stage2Response(BaseModel):
@@ -250,7 +251,7 @@ async def synthesize_themes(
     form_summary: str,
     chunk_texts: list[str],
     top_k: int = 5,
-) -> list[ThemeIdea]:
+) -> tuple[list[ThemeIdea], TokenUsage]:
     client = AsyncAnthropic(api_key=api_key)
     sources = "\n\n".join(
         f"[{i}] {text.strip()}"
@@ -258,10 +259,10 @@ async def synthesize_themes(
         if text.strip()
     )
     if not sources:
-        sources = "(no retrieved chunks; invent plausible themes from the form alone)"
+        sources = "(no retrieved chunks)"
 
     system = (
-        "You invent party theme ideas grounded in the retrieved sources when available. "
+        "You write party theme ideas grounded in the retrieved sources. "
         f"Return exactly {top_k} themes. "
         "Each title is 2-3 words. Each description is 10-15 words. "
         "Do not mention sources."
@@ -292,12 +293,12 @@ async def synthesize_themes(
         tool_choice={"type": "tool", "name": STAGE2_TOOL},
     )
 
-    usage = getattr(response, "usage", None)
+    usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
     log_pretty(
         "Theme stage2 token usage",
         {
-            "input_tokens": getattr(usage, "input_tokens", None),
-            "output_tokens": getattr(usage, "output_tokens", None),
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
 
@@ -310,4 +311,4 @@ async def synthesize_themes(
     ]
     if not themes:
         raise ThemeRecommendationError("Haiku returned no themes")
-    return themes[:top_k]
+    return themes[:top_k], usage

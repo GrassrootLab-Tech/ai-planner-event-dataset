@@ -5,7 +5,8 @@ from clients.openai_embedding_client import OpenAIEmbeddingClient
 from clients.pinecone_client import PineconeClient
 from config import Settings
 from retrieval_metadata_filter import MetadataFilterRetriever
-from streamlit_ui import render_answer, render_result_card, run_async
+from streamlit_ui import render_answer, render_claude_cost, render_result_card, run_async
+from utils.pipeline_cost import TokenUsage
 
 st.set_page_config(page_title="Metadata Filter Approach", layout="wide")
 st.title("Metadata Filter Approach")
@@ -67,8 +68,9 @@ if st.button("Search", type="primary"):
         with st.spinner(spinner_label):
             outcome = run_async(retriever.retrieve(query_text, top_k=int(top_k)))
             answer = None
+            answer_usage = TokenUsage()
             if run_final_llm:
-                answer = run_async(
+                answer, answer_usage = run_async(
                     synthesize_answer(
                         api_key=settings.anthropic_api_key,
                         model=settings.anthropic_query_tagging_model,
@@ -76,6 +78,14 @@ if st.button("Search", type="primary"):
                         results=outcome.results,
                     )
                 )
+
+        cost_stages = {"Stage 1 (query tags)": outcome.usage}
+        if run_final_llm:
+            cost_stages["Stage 2 (answer)"] = answer_usage
+        render_claude_cost(
+            settings.anthropic_query_tagging_model,
+            stages=cost_stages,
+        )
 
         with st.expander("must_have", expanded=False):
             st.json(outcome.inference.must_have)

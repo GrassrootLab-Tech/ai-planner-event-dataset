@@ -8,16 +8,19 @@ st.set_page_config(
 st.title("AI Planner Retrieval")
 st.write(
     "Compare two ways to retrieve party-planning idea chunks, "
-    "or try the theme recommendation and spark ideas POCs. "
+    "or try the theme recommendation, spark ideas, and theme packages POCs. "
     "Pick an approach from the sidebar."
 )
 
 st.subheader("Spark ideas POC")
 st.markdown(
     """
-- Fill the event form (**event_type** required)
-- **No Stage-1 LLM** — fixed query from `event_type` (+ celebratee if set)
-- Pinecone filter: **AND** `event_type` + **OR** (`statement_piece`, `photo_moment_flag`, `personalization_element`)
+- Fill the event form (**event_type** required; empty fields skip their tags)
+- Haiku Stage 1 → `input_filters` (same as theme reco)
+- Embedding query from Stage1 `event_type` (+ celebratee if set)
+- Pinecone filter: **AND** `event_type` + **OR** (`statement_piece`,
+  `photo_moment_flag`, `personalization_element`) + **OR** Stage1 tags
+  (except `event_type`)
 - Search `ai-planner-dataset` for matching spark chunks
 - Haiku writes up to **7** conversational spark ideas inspired by the chunks
 - Embed each idea with **Gemini** → query `image-index-v2`
@@ -37,6 +40,23 @@ st.markdown(
 - Embed each theme with **Gemini** → query `image-index-v2`
 - Return up to **7** themes with images
 - Find the associated vendor in the mongodb related to the image
+"""
+)
+
+st.subheader("Theme packages POC")
+st.markdown(
+    """
+- Fill the event form (**event_type** required; empty fields skip their tags)
+- Haiku Stage 1 → `input_filters` (same as theme reco)
+- **11 parallel async Pinecone facet queries** (`top_k=3` each) for vibe, food,
+  desserts, beverages, decor, lighting, entertainment, gifting, DIY, photo moments,
+  plus statement/personalization/favor spark hits
+- Stage-1 tags are merged into each facet’s `$or`
+- One Haiku call returns **3 theme packages**, each with a catchy theme name
+  (core vibe) plus **6–7** idea strings
+- Embed ideas with **Gemini** → parallel async `image-index-v2` queries
+- Drop ideas with unreachable images; show vendors under images
+- UI: one accordion (expander) per named package with a moodboard collage
 """
 )
 
@@ -70,5 +90,6 @@ st.markdown(
 
 st.info(
     "Open **metadata_filter_approach**, **reranking_approach**, "
-    "**theme_recommendation_v1_anurag**, or **spark_ideas** from the sidebar."
+    "**theme_recommendation_v1_anurag**, **spark_ideas**, or **theme_packages** "
+    "from the sidebar."
 )

@@ -15,7 +15,7 @@ from spark_ideas.constants import (
     ThemeFormInput,
 )
 from spark_ideas.service import recommend_spark_ideas
-from streamlit_ui import extract_chunk_tags, run_async
+from streamlit_ui import extract_chunk_tags, render_claude_cost, run_async
 from theme_recommendation.vendors import vendor_profile_url
 
 DEFAULT_SERVICE_TYPES = [
@@ -29,12 +29,14 @@ st.set_page_config(page_title="Spark Ideas", layout="wide")
 st.title("Spark Ideas POC")
 st.markdown(
     """
-- Fill the event form (**event_type** required)
-- **No Stage-1 LLM** — fixed embedding query from `event_type` (+ celebratee if set)
-- Pinecone filter: **AND** `event_type` + **OR** of these three spark signals:
-  - **statement_piece** — field `$exists` (sentinels / empty lists are not stored)
-  - **photo_moment_flag** — `$eq` true (strong photo opportunity)
-  - **personalization_element** — field `$exists` (sentinels / empty lists are not stored)
+- Fill the event form (**event_type** required; empty fields skip their tags)
+- Haiku Stage 1 maps answers → `input_filters` (same as theme reco)
+- Embedding query uses Stage1 `event_type` enum (+ celebratee if set)
+- Pinecone filter: **AND** of
+  - `event_type` (from Stage1)
+  - **OR** spark signals: `statement_piece` `$exists`, `photo_moment_flag` true,
+    `personalization_element` `$exists`
+  - **OR** Stage1 `input_filters` (except `event_type`)
 - Search `ai-planner-dataset` for top **7** matching chunks
 - Haiku writes **7** numbered conversational spark ideas (inspired by the chunks)
 - Embed each idea with **Gemini** → query `image-index-v2`
@@ -122,7 +124,10 @@ if st.button("Spark ideas", type="primary"):
             index_name=settings.pinecone_image_index_name,
         )
 
-        with st.spinner("Retrieving spark chunks, synthesizing ideas, fetching images..."):
+        with st.spinner(
+            "Stage 1 filters, retrieving spark chunks, synthesizing ideas, "
+            "fetching images..."
+        ):
 
             async def _run():
                 mongo = Mongo(settings.mongo_uri, settings.vendors_mongo_db_name)
@@ -144,6 +149,21 @@ if st.button("Spark ideas", type="primary"):
 
             outcome = run_async(_run())
 
+        render_claude_cost(
+            settings.anthropic_query_tagging_model,
+            stages={
+                "Stage 1 (filters)": outcome.stage1_usage,
+                "Stage 2 (spark ideas)": outcome.stage2_usage,
+            },
+        )
+
+        with st.expander("Stage 1 LLM output", expanded=False):
+            st.json(
+                {
+                    "input_filters": outcome.stage1.input_filters,
+                    "pinecone_query": outcome.stage1.pinecone_query,
+                }
+            )
         with st.expander("Embedding query", expanded=False):
             st.write(outcome.pinecone_query)
         with st.expander("Pinecone filters", expanded=False):

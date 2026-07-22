@@ -5,7 +5,8 @@ from clients.openai_embedding_client import OpenAIEmbeddingClient
 from clients.pinecone_client import PineconeClient
 from config import Settings
 from retrieval import Retriever
-from streamlit_ui import render_answer, render_result_card, run_async
+from streamlit_ui import render_answer, render_claude_cost, render_result_card, run_async
+from utils.pipeline_cost import TokenUsage
 
 st.set_page_config(page_title="Reranking Approach", layout="wide")
 st.title("Reranking Approach")
@@ -84,8 +85,9 @@ if st.button("Search", type="primary"):
                 )
             )
             answer = None
+            answer_usage = TokenUsage()
             if run_final_llm:
-                answer = run_async(
+                answer, answer_usage = run_async(
                     synthesize_answer(
                         api_key=settings.anthropic_api_key or "",
                         model=settings.anthropic_query_tagging_model,
@@ -93,6 +95,12 @@ if st.button("Search", type="primary"):
                         results=results,
                     )
                 )
+
+        if run_final_llm:
+            render_claude_cost(
+                settings.anthropic_query_tagging_model,
+                stages={"Answer synthesis": answer_usage},
+            )
 
         st.subheader(f"Results ({len(results)})")
         if not results:

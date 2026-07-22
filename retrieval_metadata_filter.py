@@ -14,6 +14,7 @@ from tags.order import SCALAR_LIST_VALUES
 from tags.registry import TagRegistry
 from tags.spec import TagDefinition
 from utils.logger import log_pretty
+from utils.pipeline_cost import TokenUsage
 
 TOOL_NAME = "submit_query_tags"
 MAX_TOKENS = 4096
@@ -37,6 +38,7 @@ class MetadataFilterRetrievalResult:
     results: list[RetrievalResult]
     inference: QueryTagInference
     filter: dict[str, Any] | None
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 def filterable_tags(tag_registry: TagRegistry) -> list[TagDefinition]:
@@ -168,11 +170,11 @@ async def infer_query_tags(
     model: str,
     query: str,
     tag_registry: TagRegistry | None = None,
-) -> QueryTagInference:
+) -> tuple[QueryTagInference, TokenUsage]:
     registry = tag_registry or TagRegistry()
     tags = filterable_tags(registry)
     if not tags:
-        return QueryTagInference()
+        return QueryTagInference(), TokenUsage()
 
     tags_by_name = {tag.name: tag for tag in tags}
     response_model = _build_response_model(tags)
@@ -205,12 +207,12 @@ async def infer_query_tags(
         tool_choice={"type": "tool", "name": TOOL_NAME},
     )
 
-    usage = getattr(response, "usage", None)
+    usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
     log_pretty(
         "Anthropic query-tag token usage",
         {
-            "input_tokens": getattr(usage, "input_tokens", None),
-            "output_tokens": getattr(usage, "output_tokens", None),
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
 
@@ -227,7 +229,7 @@ async def infer_query_tags(
             "good_to_have": inference.good_to_have,
         },
     )
-    return inference
+    return inference, usage
 
 
 def _clause_for_tag(tag_name: str, value: list[str] | bool) -> dict[str, Any]:
@@ -284,7 +286,7 @@ class MetadataFilterRetriever:
         *,
         top_k: int = 5,
     ) -> MetadataFilterRetrievalResult:
-        inference = await infer_query_tags(
+        inference, usage = await infer_query_tags(
             api_key=self._anthropic_api_key,
             model=self._anthropic_model,
             query=query,
@@ -324,6 +326,7 @@ class MetadataFilterRetriever:
             results=results,
             inference=inference,
             filter=pinecone_filter,
+            usage=usage,
         )
 
 

@@ -4,6 +4,7 @@ from anthropic import AsyncAnthropic
 
 from retrieval import RetrievalResult
 from utils.logger import log_pretty
+from utils.pipeline_cost import TokenUsage
 
 SYSTEM_PROMPT = """You're a friendly, enthusiastic event-planning buddy. Share ideas as your 
 own genuine suggestions — never mention sources, documents, or how you know 
@@ -43,9 +44,12 @@ async def synthesize_answer(
     model: str,
     query: str,
     results: list[RetrievalResult],
-) -> str:
+) -> tuple[str, TokenUsage]:
     if not results:
-        return "No sources were retrieved, so I can't answer from the available information."
+        return (
+            "No sources were retrieved, so I can't answer from the available information.",
+            TokenUsage(),
+        )
 
     client = AsyncAnthropic(api_key=api_key)
     user_message = build_user_message(query, results)
@@ -66,12 +70,12 @@ async def synthesize_answer(
         messages=[{"role": "user", "content": user_message}],
     )
 
-    usage = getattr(response, "usage", None)
+    usage = TokenUsage.from_anthropic(getattr(response, "usage", None))
     log_pretty(
         "Anthropic answer-synthesis token usage",
         {
-            "input_tokens": getattr(usage, "input_tokens", None),
-            "output_tokens": getattr(usage, "output_tokens", None),
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
 
@@ -83,4 +87,4 @@ async def synthesize_answer(
                 text_parts.append(text)
 
     answer = "\n".join(text_parts).strip()
-    return answer or "The model returned an empty answer."
+    return answer or "The model returned an empty answer.", usage

@@ -1,4 +1,4 @@
-"""Orchestrate spark ideas: fixed filter → text retrieve → ideas → images."""
+"""Orchestrate spark ideas: Stage1 filters → text retrieve → ideas → images."""
 
 from __future__ import annotations
 
@@ -14,8 +14,13 @@ from spark_ideas.constants import SPARK_DISPLAY_COUNT, ThemeFormInput
 from spark_ideas.context import build_spark_query, form_summary_for_prompt
 from spark_ideas.filter_builder import build_spark_pinecone_filter
 from spark_ideas.haiku import SparkIdea, synthesize_spark_ideas
+from tags.registry import TagRegistry
+from theme_packages.filter_builder import event_type_from_input_filters
+from theme_recommendation.context import active_tag_definitions
+from theme_recommendation.haiku import Stage1Result, infer_theme_filters
 from theme_recommendation.vendors import fetch_vendors_by_ids
 from utils.logger import log_pretty
+from utils.pipeline_cost import TokenUsage
 
 IMAGE_PROBE_TIMEOUT_S = 5.0
 
@@ -33,11 +38,18 @@ class SparkIdeaWithImage:
 
 @dataclass
 class SparkIdeasResult:
+    stage1: Stage1Result
     pinecone_query: str
     pinecone_filter: dict[str, Any]
     chunk_matches: list[dict[str, Any]] = field(default_factory=list)
     stage2_ideas: list[SparkIdea] = field(default_factory=list)
     ideas: list[SparkIdeaWithImage] = field(default_factory=list)
+    stage1_usage: TokenUsage = field(default_factory=TokenUsage)
+    stage2_usage: TokenUsage = field(default_factory=TokenUsage)
+
+    @property
+    def usage(self) -> TokenUsage:
+        return self.stage1_usage + self.stage2_usage
 
 
 async def recommend_spark_ideas(
@@ -51,10 +63,24 @@ async def recommend_spark_ideas(
     anthropic_model: str,
     top_k: int = 7,
     vendors_collection: Any | None = None,
+    tag_registry: TagRegistry | None = None,
 ) -> SparkIdeasResult:
+    registry = tag_registry or TagRegistry()
     form_summary = form_summary_for_prompt(form)
-    pinecone_query = build_spark_query(form)
-    pinecone_filter = build_spark_pinecone_filter(form.event_type)
+    tags = active_tag_definitions(form, registry)
+
+    stage1, stage1_usage = await infer_theme_filters(
+        api_key=anthropic_api_key,
+        model=anthropic_model,
+        form_summary=form_summary,
+        tags=tags,
+    )
+    event_type = event_type_from_input_filters(stage1.input_filters)
+    pinecone_query = build_spark_query(
+        event_type=event_type,
+        celebratee=form.celebratee,
+    )
+    pinecone_filter = build_spark_pinecone_filter(stage1.input_filters)
 
     query_vectors, _ = await embedder.embed_texts([pinecone_query])
     matches = chunk_index.query(
@@ -74,7 +100,7 @@ async def recommend_spark_ideas(
     ]
     chunk_texts = [str(m["chunk"]) for m in chunk_matches]
 
-    spark_ideas = await synthesize_spark_ideas(
+    spark_ideas, stage2_usage = await synthesize_spark_ideas(
         api_key=anthropic_api_key,
         model=anthropic_model,
         form_summary=form_summary,
@@ -87,6 +113,7 @@ async def recommend_spark_ideas(
     if vendors_collection is not None:
         ideas = await _attach_vendors(ideas, vendors_collection)
 
+    usage = stage1_usage + stage2_usage
     log_pretty(
         "Spark ideas completed",
         {
@@ -95,14 +122,24 @@ async def recommend_spark_ideas(
             "idea_count": len(ideas),
             "filter": pinecone_filter,
             "pinecone_query": pinecone_query,
+            "input_filters": stage1.input_filters,
+            "stage1_input_tokens": stage1_usage.input_tokens,
+            "stage1_output_tokens": stage1_usage.output_tokens,
+            "stage2_input_tokens": stage2_usage.input_tokens,
+            "stage2_output_tokens": stage2_usage.output_tokens,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
         },
     )
     return SparkIdeasResult(
+        stage1=stage1,
         pinecone_query=pinecone_query,
         pinecone_filter=pinecone_filter,
         chunk_matches=chunk_matches,
         stage2_ideas=spark_ideas,
         ideas=ideas,
+        stage1_usage=stage1_usage,
+        stage2_usage=stage2_usage,
     )
 
 
