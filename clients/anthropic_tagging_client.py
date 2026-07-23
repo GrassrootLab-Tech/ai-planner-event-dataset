@@ -1,6 +1,6 @@
-import json
 from typing import Any
 
+import json_repair
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
@@ -172,24 +172,31 @@ class AnthropicTaggingClient:
     @staticmethod
     def _parse_chunks_json(raw: str) -> list[Any]:
         text = raw.strip()
-        try:
-            parsed: Any = json.loads(text)
-        except json.JSONDecodeError:
+        parsed: Any = AnthropicTaggingClient._loads_repaired_json(text)
+        if parsed is None:
             start = text.find("[")
             end = text.rfind("]")
             if start == -1 or end == -1 or end <= start:
                 raise TaggingError(
                     "Anthropic tool_use chunks is a non-JSON string"
-                ) from None
-            try:
-                parsed = json.loads(text[start : end + 1])
-            except json.JSONDecodeError as exc:
+                )
+            parsed = AnthropicTaggingClient._loads_repaired_json(
+                text[start : end + 1]
+            )
+            if parsed is None:
                 raise TaggingError(
                     "Anthropic tool_use chunks string could not be parsed as JSON"
-                ) from exc
+                )
         if not isinstance(parsed, list):
             raise TaggingError("Anthropic tool_use chunks JSON is not a list")
         return parsed
+
+    @staticmethod
+    def _loads_repaired_json(raw: str) -> Any | None:
+        try:
+            return json_repair.loads(raw)
+        except Exception:
+            return None
 
     @staticmethod
     def map_results(

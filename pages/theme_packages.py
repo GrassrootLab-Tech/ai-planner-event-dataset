@@ -203,7 +203,7 @@ def _render_packages(packages: list[ThemePackageResult]) -> None:
         return
     for pkg_index, package in enumerate(packages, start=1):
         label = package.name.strip() or f"Theme Package {pkg_index}"
-        with st.expander(label, expanded=False):
+        with st.expander(label, expanded=pkg_index == 1):
             if not package.ideas:
                 st.caption("No ideas with accessible images in this package.")
                 continue

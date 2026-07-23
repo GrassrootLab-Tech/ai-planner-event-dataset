@@ -8,8 +8,18 @@ st.set_page_config(
 st.title("AI Planner Retrieval")
 st.write(
     "Compare two ways to retrieve party-planning idea chunks, "
-    "or try the theme recommendation, spark ideas, and theme packages POCs. "
-    "Pick an approach from the sidebar."
+    "or try the theme recommendation, spark ideas, theme packages, "
+    "and other similar vendors POCs. Pick an approach from the sidebar."
+)
+
+st.subheader("Other Similar Vendors")
+st.markdown(
+    """
+- Enter a vendor **business name**
+- Look up `vendor_id` in MongoDB `vendors`
+- Call PartyHub `/api/v1/vendors/id/{vendor_id}/suggested-vendors`
+- Show each similar vendor in an accordion with image, categories, location, and pricing
+"""
 )
 
 st.subheader("Spark ideas POC")
@@ -90,6 +100,6 @@ st.markdown(
 
 st.info(
     "Open **metadata_filter_approach**, **reranking_approach**, "
-    "**theme_recommendation_v1_anurag**, **spark_ideas**, or **theme_packages** "
-    "from the sidebar."
+    "**theme_recommendation_v1_anurag**, **spark_ideas**, **theme_packages**, "
+    "or **Other Similar Vendors** from the sidebar."
 )
