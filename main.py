@@ -797,7 +797,7 @@ async def run_all_sample(
     *,
     skip: int = 0,
     limit: int | None = None,
-    cache: bool = False,
+    cache: bool = True,
     concurrency: int = 1,
 ) -> tuple[list[dict[str, Any]], Path, Path]:
     pages, source_name = load_batch_pages(json_path, skip=skip, limit=limit)
@@ -921,7 +921,7 @@ async def run_stage_batch(
     *,
     skip: int = 0,
     limit: int | None = None,
-    cache: bool = False,
+    cache: bool = True,
     concurrency: int = 1,
 ) -> tuple[list[dict[str, Any]], Path]:
     if stage not in STAGE_CHOICES:
@@ -1115,9 +1115,9 @@ def main() -> None:
     _add_concurrency_arg(run_all_sample_parser)
     run_all_sample_parser.add_argument(
         "--cache",
-        action="store_true",
-        default=False,
-        help="Cache the tagging system prompt (1h TTL)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache the tagging system prompt (1h TTL; on by default)",
     )
 
     run_stage_batch_parser = subparsers.add_parser(
@@ -1145,9 +1145,9 @@ def main() -> None:
     _add_concurrency_arg(run_stage_batch_parser)
     run_stage_batch_parser.add_argument(
         "--cache",
-        action="store_true",
-        default=False,
-        help="Cache the tagging system prompt (1h TTL; tag stage only)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache the tagging system prompt (1h TTL; tag stage only; on by default)",
     )
 
     subparsers.add_parser(
