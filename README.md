@@ -52,6 +52,20 @@ python main.py run-all "<url>" --cache
 python main.py populate-tags
 ```
 
+## Vendor profile SERP
+
+Queue DataForSEO Google organic tasks for vendor directories (`site:{source} {category} in {city}`), store in Mongo `vendor_data_serp_results`, then poll for results. Depth is 10; existing `search_query` docs are skipped.
+
+```bash
+# Interactive: paste one allowlisted source, then city/category index slices (default 0–5)
+python scripts/fetch_vendor_serp_results.py
+
+# One-shot poll of status=queued → ok/failed (re-run until empty)
+python scripts/poll_vendor_serp_results.py
+```
+
+Allowlisted sources, cities, and categories live in `scripts/vendor_profile_sources.py`. Requires `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`.
+
 ## Retrieval UI
 
 ```bash
@@ -64,6 +78,9 @@ streamlit run app.py
 |------|------|
 | `main.py` | CLI entrypoint |
 | `services/` | Scrape → chunk → classify → tag → embed |
+| `scripts/fetch_vendor_serp_results.py` | Queue vendor SERP tasks (interactive) |
+| `scripts/poll_vendor_serp_results.py` | Poll queued vendor SERP results |
+| `scripts/vendor_profile_sources.py` | Vendor SERP sources / cities / categories |
 | `reddit/` | Reddit fetch + chunking |
 | `clients/` | HasData, OpenAI, Anthropic, Pinecone |
 | `tags/` | Tag definitions + prompts |
