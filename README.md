@@ -70,9 +70,13 @@ python -m vendor_profiles stage --batch-size 100 --concurrency 3
 # Stage from vendor_profiles/sample_urls.py instead
 python -m vendor_profiles stage --run-sample
 python -m vendor_profiles stage --run-sample --concurrency 3
+
+# Scrape next batch of staged|failed profiles → html, markdown, scraped_at, status=scraped
+python -m vendor_profiles scrape
+python -m vendor_profiles scrape --batch-size 100 --concurrency 3
 ```
 
-Default stage pulls from `vendor_data_serp_results` (`status: ok`), picks URLs whose `results[].status` is missing or not `processed`, stages them, then sets `results[].status` to `processed`. Sample mode uses [`vendor_profiles/sample_urls.py`](vendor_profiles/sample_urls.py) and does not update SERP statuses. Sources/cities/categories: `vendor_profiles/sources.py`. Regex rules: `vendor_profiles/source_rules.py`. After each stage run: `vendor_profiles/output/{timestamp}_{N}_urls_run.txt` (per-URL success/failed + Haiku cost, plus totals). Skip notes: `vendor_profiles/output/vendor_stage_report.txt`.
+Default stage pulls from `vendor_data_serp_results` (`status: ok`), picks URLs whose `results[].status` is missing or not `processed`, stages them, then sets `results[].status` to `processed`. Sample mode uses [`vendor_profiles/sample_urls.py`](vendor_profiles/sample_urls.py) and does not update SERP statuses. Scrape picks FIFO `vendors_scraped_profiles` with `status` in `staged|failed`; success writes `html`/`markdown`/`scraped_at` and `status: scraped`, failures set `status: failed`. Sources/cities/categories: `vendor_profiles/sources.py`. Regex rules: `vendor_profiles/source_rules.py`. After each stage run: `vendor_profiles/output/{timestamp}_{N}_urls_run.txt` (per-URL success/failed + Haiku cost, plus totals). Skip notes: `vendor_profiles/output/vendor_stage_report.txt`.
 
 Env (same `.env`): `HASDATA_API_KEY`, `DATAFORSEO_*`, `ANTHROPIC_API_KEY`, `MONGO_*`, `VENDOR_DATA_SERP_RESULTS_COLLECTION`, `VENDORS_SCRAPED_*`.
 
@@ -87,7 +91,7 @@ streamlit run app.py
 | Path | Role |
 |------|------|
 | `main.py` | Event article pipeline CLI |
-| `vendor_profiles/` | Vendor SERP + stage package (`python -m vendor_profiles`) |
+| `vendor_profiles/` | Vendor SERP + stage + scrape package (`python -m vendor_profiles`) |
 | `services/` | Event scrape → chunk → classify → tag → embed |
 | `reddit/` | Reddit fetch + chunking |
 | `clients/` | Shared HasData, OpenAI, Anthropic, Pinecone |

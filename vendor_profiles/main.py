@@ -1,7 +1,8 @@
-"""CLI for vendor profile SERP + stage pipeline.
+"""CLI for vendor profile SERP + stage + scrape pipeline.
 
   python -m vendor_profiles stage [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles stage --run-sample [--concurrency 3]
+  python -m vendor_profiles scrape [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles fetch-serp [--workers 4]
   python -m vendor_profiles poll-serp [--workers 4]
 """
@@ -31,6 +32,7 @@ from vendor_profiles.db.serp_results_repo import StagePage, VendorsSerpResultsRe
 from vendor_profiles.sample_urls import PAGE_URLS
 from vendor_profiles.scripts.fetch_serp import DEFAULT_WORKERS, run_fetch_serp
 from vendor_profiles.scripts.poll_serp import run_poll_serp
+from vendor_profiles.services.scrape_service import ScrapeOutcome, VendorScrapeService
 from vendor_profiles.services.stage_service import (
     VENDOR_OUTPUT_DIR,
     VENDOR_STAGE_REPORT_PATH,
@@ -291,6 +293,84 @@ async def run_stage(
         await mongo.disconnect()
 
 
+async def run_scrape_batch(
+    *,
+    concurrency: int = 3,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> list[ScrapeOutcome]:
+    set_log_stage("vendor_scrape")
+    if concurrency < 1:
+        raise ValueError("--concurrency must be >= 1")
+    if batch_size < 1:
+        raise ValueError("--batch-size must be >= 1")
+
+    settings = VendorSettings()
+    _log_settings(settings)
+
+    mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
+    await mongo.connect()
+    try:
+        profiles_repo = VendorsScrapedProfilesRepository(
+            mongo.db[settings.vendors_scraped_profiles_collection]
+        )
+        await profiles_repo.ensure_indexes()
+
+        pages = await profiles_repo.list_scrape_candidates(batch_size)
+        if not pages:
+            logger.warning(
+                "No staged|failed profiles to scrape — nothing to do"
+            )
+            print("No staged|failed profiles to scrape — nothing to do")
+            return []
+
+        total = len(pages)
+        logger.info(
+            "Vendor scrape: %d URLs batch_size=%d concurrency=%d",
+            total,
+            batch_size,
+            concurrency,
+        )
+
+        service = VendorScrapeService(
+            profiles_repo=profiles_repo,
+            hasdata=HasDataClient(settings.hasdata_api_key),
+        )
+
+        progress_lock = asyncio.Lock()
+        progress_done = 0
+
+        async def scrape_one(page: dict) -> ScrapeOutcome:
+            nonlocal progress_done
+            page_url = str(page["page_url"])
+            outcome = await service.scrape_url(page_url)
+            async with progress_lock:
+                progress_done += 1
+                done = progress_done
+            status = "ok" if outcome.ok else "failed"
+            print(
+                f"processing [{done} / {total}] {status} {page_url}"
+                + (f" | {outcome.detail}" if outcome.detail else "")
+            )
+            return outcome
+
+        results = await map_concurrent(pages, concurrency, scrape_one)
+
+        ok_count = sum(1 for r in results if r.ok)
+        failed_count = total - ok_count
+        summary = {
+            "url_count": total,
+            "scraped_ok": ok_count,
+            "failed": failed_count,
+        }
+        log_pretty("Vendor scrape summary", summary)
+        print("Vendor scrape summary:")
+        for key, value in summary.items():
+            print(f"  {key}: {value}")
+        return results
+    finally:
+        await mongo.disconnect()
+
+
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(
@@ -324,6 +404,23 @@ def main() -> None:
         type=int,
         default=3,
         help="Max URLs to process in parallel (default: 3)",
+    )
+
+    scrape_parser = sub.add_parser(
+        "scrape",
+        help="Scrape staged|failed vendor profiles via HasData (html+markdown)",
+    )
+    scrape_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help=f"Max staged|failed profiles to scrape (default: {DEFAULT_BATCH_SIZE})",
+    )
+    scrape_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="Max URLs to scrape in parallel (default: 3)",
     )
 
     fetch_parser = sub.add_parser(
@@ -360,6 +457,16 @@ def main() -> None:
                 )
             )
             if sum(1 for r in results if r.outcome == "error"):
+                sys.exit(1)
+        elif args.command == "scrape":
+            set_log_stage("vendor_scrape")
+            results = asyncio.run(
+                run_scrape_batch(
+                    concurrency=args.concurrency,
+                    batch_size=args.batch_size,
+                )
+            )
+            if sum(1 for r in results if not r.ok):
                 sys.exit(1)
         elif args.command == "fetch-serp":
             set_log_stage("vendor_serp")

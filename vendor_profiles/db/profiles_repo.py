@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 
 from utils.logger import logger
+
+SCRAPE_ELIGIBLE_STATUSES = ("staged", "failed")
 
 
 class VendorsScrapedProfilesRepository:
@@ -17,6 +23,10 @@ class VendorsScrapedProfilesRepository:
             [("page_url", ASCENDING)],
             unique=True,
             name="page_url_unique",
+        )
+        await self._collection.create_index(
+            [("status", ASCENDING)],
+            name="status_idx",
         )
         self._index_ready = True
 
@@ -60,4 +70,53 @@ class VendorsScrapedProfilesRepository:
         await self._collection.update_many(
             {"page_url": {"$in": page_urls}},
             {"$set": {"status": status}},
+        )
+
+    async def list_scrape_candidates(self, limit: int) -> list[dict]:
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        cursor = (
+            self._collection.find(
+                {"status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)}},
+                {"page_url": 1},
+            )
+            .sort("_id", ASCENDING)
+            .limit(limit)
+        )
+        docs: list[dict] = []
+        async for doc in cursor:
+            page_url = doc.get("page_url")
+            if isinstance(page_url, str) and page_url.strip():
+                docs.append({"page_url": page_url})
+        return docs
+
+    async def save_scrape(
+        self,
+        page_url: str,
+        *,
+        html: str,
+        markdown: str,
+    ) -> bool:
+        now = datetime.now(timezone.utc)
+        result = await self._collection.update_one(
+            {
+                "page_url": page_url,
+                "status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)},
+            },
+            {
+                "$set": {
+                    "html": html,
+                    "markdown": markdown,
+                    "scraped_at": now,
+                    "status": "scraped",
+                },
+                "$unset": {"error": ""},
+            },
+        )
+        return result.modified_count == 1
+
+    async def mark_failed(self, page_url: str, error: str) -> None:
+        await self._collection.update_one(
+            {"page_url": page_url},
+            {"$set": {"status": "failed", "error": error}},
         )
