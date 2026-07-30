@@ -8,3 +8,5 @@ vendor_profiles/output/
 AI Planner Data Extraction tags*
 input_urls/
 checklists/
+*.txt
+!requirements.txt
