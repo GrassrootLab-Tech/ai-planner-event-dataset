@@ -9,38 +9,23 @@ from pathlib import Path
 
 from pymongo import MongoClient
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = Path(__file__).resolve().parent
-for path in (ROOT, SCRIPTS):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+SCRIPTS_ROOT = ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from config import Settings
-from fetch_serp_results import DEFAULT_WORKERS, get_serp_task
-from fetch_vendor_serp_results import DEPTH
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "One-shot poll of status=queued vendor SERP docs and fill results."
-        )
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=DEFAULT_WORKERS,
-        help=f"Thread pool size (default: {DEFAULT_WORKERS})",
-    )
-    return parser.parse_args()
+from fetch_serp_results import DEFAULT_WORKERS, get_serp_task  # noqa: E402
+from vendor_profiles.config import VendorSettings  # noqa: E402
+from vendor_profiles.scripts.fetch_serp import DEPTH  # noqa: E402
 
 
-def main() -> None:
-    args = parse_args()
-    if args.workers < 1:
+def run_poll_serp(*, workers: int = DEFAULT_WORKERS) -> None:
+    if workers < 1:
         raise SystemExit("--workers must be >= 1")
 
-    settings = Settings()
+    settings = VendorSettings()
     if not settings.dataforseo_login or not settings.dataforseo_password:
         raise SystemExit(
             "DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD must be set in the environment / .env"
@@ -53,7 +38,7 @@ def main() -> None:
 
     queued = list(collection.find({"status": "queued"}))
     total = len(queued)
-    print(f"Queued docs: {total} | workers={args.workers}")
+    print(f"Queued docs: {total} | workers={workers}")
 
     if total == 0:
         client.close()
@@ -106,7 +91,7 @@ def main() -> None:
         )
         return label, "failed", 0, error_msg
 
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(process_doc, doc): doc for doc in queued}
         done = 0
         for future in as_completed(futures):
@@ -126,6 +111,18 @@ def main() -> None:
 
     client.close()
     print("Done.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Poll vendor SERP tasks")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help=f"Thread pool size (default: {DEFAULT_WORKERS})",
+    )
+    args = parser.parse_args()
+    run_poll_serp(workers=args.workers)
 
 
 if __name__ == "__main__":

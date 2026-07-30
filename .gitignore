@@ -4,6 +4,7 @@ venv
 .DS_Store
 __pycache__
 output/
+vendor_profiles/output/
 AI Planner Data Extraction tags*
 input_urls/
 checklists/

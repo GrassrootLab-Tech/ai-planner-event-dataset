@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     event_scraped_content_collection: str = "event_scraped_content"
     event_scraped_chunks_collection: str = "event_scraped_chunks"
     event_data_serp_results_collection: str = "event_data_serp_results"
-    vendor_data_serp_results_collection: str = "vendor_data_serp_results"
     chunk_output_dir: str = "output/cleaned"
     chunk_min_words: int = 30
     openai_embedding_model: str = "text-embedding-3-small"

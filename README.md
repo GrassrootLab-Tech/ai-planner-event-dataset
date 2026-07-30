@@ -52,19 +52,29 @@ python main.py run-all "<url>" --cache
 python main.py populate-tags
 ```
 
-## Vendor profile SERP
+## Vendor profiles (`vendor_profiles/`)
 
-Queue DataForSEO Google organic tasks for vendor directories (`site:{source} {category} in {city}`), store in Mongo `vendor_data_serp_results`, then poll for results. Depth is 10; existing `search_query` docs are skipped.
+Self-contained package with its own settings (`VendorSettings`) and CLI. Uses research Mongo collections for SERP + staged profiles.
 
 ```bash
-# Interactive: paste one allowlisted source, then city/category index slices (default 0–5)
-python scripts/fetch_vendor_serp_results.py
+# Interactive SERP queue (paste source, city/category slices)
+python -m vendor_profiles fetch-serp
 
-# One-shot poll of status=queued → ok/failed (re-run until empty)
-python scripts/poll_vendor_serp_results.py
+# Poll queued SERP tasks
+python -m vendor_profiles poll-serp
+
+# Stage unprocessed SERP result URLs (even source/city/category mix; default batch 100)
+python -m vendor_profiles stage
+python -m vendor_profiles stage --batch-size 100 --concurrency 3
+
+# Stage from vendor_profiles/sample_urls.py instead
+python -m vendor_profiles stage --run-sample
+python -m vendor_profiles stage --run-sample --concurrency 3
 ```
 
-Allowlisted sources, cities, and categories live in `scripts/vendor_profile_sources.py`. Requires `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`.
+Default stage pulls from `vendor_data_serp_results` (`status: ok`), picks URLs whose `results[].status` is missing or not `processed`, stages them, then sets `results[].status` to `processed`. Sample mode uses [`vendor_profiles/sample_urls.py`](vendor_profiles/sample_urls.py) and does not update SERP statuses. Sources/cities/categories: `vendor_profiles/sources.py`. Regex rules: `vendor_profiles/source_rules.py`. After each stage run: `vendor_profiles/output/{timestamp}_{N}_urls_run.txt` (per-URL success/failed + Haiku cost, plus totals). Skip notes: `vendor_profiles/output/vendor_stage_report.txt`.
+
+Env (same `.env`): `HASDATA_API_KEY`, `DATAFORSEO_*`, `ANTHROPIC_API_KEY`, `MONGO_*`, `VENDOR_DATA_SERP_RESULTS_COLLECTION`, `VENDORS_SCRAPED_*`.
 
 ## Retrieval UI
 
@@ -76,12 +86,10 @@ streamlit run app.py
 
 | Path | Role |
 |------|------|
-| `main.py` | CLI entrypoint |
-| `services/` | Scrape → chunk → classify → tag → embed |
-| `scripts/fetch_vendor_serp_results.py` | Queue vendor SERP tasks (interactive) |
-| `scripts/poll_vendor_serp_results.py` | Poll queued vendor SERP results |
-| `scripts/vendor_profile_sources.py` | Vendor SERP sources / cities / categories |
+| `main.py` | Event article pipeline CLI |
+| `vendor_profiles/` | Vendor SERP + stage package (`python -m vendor_profiles`) |
+| `services/` | Event scrape → chunk → classify → tag → embed |
 | `reddit/` | Reddit fetch + chunking |
-| `clients/` | HasData, OpenAI, Anthropic, Pinecone |
+| `clients/` | Shared HasData, OpenAI, Anthropic, Pinecone |
 | `tags/` | Tag definitions + prompts |
 | `app.py` / `pages/` | Streamlit retrieval demos |
