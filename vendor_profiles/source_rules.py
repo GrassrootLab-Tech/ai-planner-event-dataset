@@ -20,39 +20,78 @@ class VendorSourceRules:
     profile_url_re: re.Pattern[str]
 
 
+# First path segment on thebash.com that is never a vendor profile.
+_THEBASH_NON_VENDOR_FIRST_SEGMENTS = frozenset(
+    {
+        "services",
+        "search",
+        "articles",
+        "themes",
+        "events",
+        "login",
+        "signup",
+        "gigkids",
+        "virtual-event-services",
+        "event-inspiration",
+        "musical-entertainment",
+        "variety-act-landing",
+        "speakers",
+        "event-services",
+        "guarantee",
+        "about",
+        "help",
+        "venues",
+        "contact",
+        "terms-of-use",
+        "ai-terms",
+        "ai-usage-policy",
+    }
+)
+_THEBASH_NON_VENDOR_FIRST_ALT = "|".join(
+    sorted(_THEBASH_NON_VENDOR_FIRST_SEGMENTS, key=len, reverse=True)
+)
+
+
 # For each domain: (profile_regex, directory_regex)
-# Match against urlparse(url).path (lowercased where the site is case-insensitive)
+# All patterns match urlparse(url).path only (classify_url never tests the full URL).
 PATTERNS = {
     "thebash.com": {
-        # /entertainer/lumina
-        "profile":   re.compile(r"^/(?!search/)[a-z0-9-]+/[a-z0-9-]+/?$"),
+        # /blues-band/ellie-d-soul-mix — exclude nav/listing first segments
+        "profile": re.compile(
+            rf"^/(?!(?:{_THEBASH_NON_VENDOR_FIRST_ALT})/)"
+            r"[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*/?$"
+        ),
         # /search/acrobat-denver-co
         "directory": re.compile(r"^/search/[a-z0-9]+(?:-[a-z0-9]+)*/?$"),
     },
     "gigsalad.com": {
         # /chuck_roy_denver, /leah_althoff_stand_up_comedy_denver, /matt_cobos_denver/contact
-        "profile":   re.compile(
+        "profile": re.compile(
             r"^/[a-z0-9]+(?:[-_][a-z0-9]+)*(?:/contact)?/?$",
             re.IGNORECASE,
         ),
         # /Comedians-Emcees/Stand-Up-Comedians/CO/Denver
-        "directory": re.compile(r"^/[A-Za-z0-9-]+/[A-Za-z0-9-]+/[A-Z]{2}/[A-Za-z0-9-]+/?$"),
+        "directory": re.compile(
+            r"^/[A-Za-z0-9-]+/[A-Za-z0-9-]+/[A-Z]{2}/[A-Za-z0-9-]+/?$"
+        ),
     },
     "partyslate.com": {
         # /vendors/good-musicians
-        "profile":   re.compile(r"^/vendors/[a-z0-9]+(?:-[a-z0-9]+)+/?$"),
+        "profile": re.compile(r"^/vendors/[a-z0-9]+(?:-[a-z0-9]+)+/?$"),
         # /find-vendors/event-entertainment/area/denver, /find-venues/corporate-event-venues/near/denver-co-usa/types/museum
-        "directory": re.compile(r"^/find-(?:vendors|venues)/[a-z0-9-]+(?:/[a-z0-9-]+)*/?$"),
+        "directory": re.compile(
+            r"^/find-(?:vendors|venues)/[a-z0-9-]+(?:/[a-z0-9-]+)*/?$"
+        ),
     },
     "theknot.com": {
         # /marketplace/steve-shurack-denver-co-490736  (ends in -digits)
-        "profile":   re.compile(r"^/marketplace/[a-z0-9]+(?:-[a-z0-9]+)*-\d+/?$"),
+        "profile": re.compile(r"^/marketplace/[a-z0-9]+(?:-[a-z0-9]+)*-\d+/?$"),
         # /marketplace/live-wedding-bands-denver-co  (ends in 2-letter state code)
         "directory": re.compile(r"^/marketplace/[a-z]+(?:-[a-z]+)*-[a-z]{2}/?$"),
     },
     "zola.com": {
         # /wedding-vendors/wedding-bands-djs/nexus-strings
-        "profile":   re.compile(
+        "profile": re.compile(
             r"^/wedding-vendors/(?!search/)[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)+/?$"
         ),
         # /wedding-vendors/search/denver-co--wedding-bands-djs
@@ -61,7 +100,7 @@ PATTERNS = {
     "weddingwire.com": {
         # /biz/great-family-artists/8badbbfd76385de2.html
         # /reviews/great-family-artists/8badbbfd76385de2.html
-        "profile":   re.compile(
+        "profile": re.compile(
             r"^/(?:biz|reviews)/[a-z0-9]+(?:-[a-z0-9]+)+/[0-9a-f]+\.html$"
         ),
         # /c/co-colorado/.../wedding-ceremony-music/751-4-rca.html
@@ -72,7 +111,7 @@ PATTERNS = {
     },
     "thumbtack.com": {
         # /co/littleton/bands-for-hire/charlie-z-denver-jazz-quartet/service/484077481175605256
-        "profile":   re.compile(
+        "profile": re.compile(
             r"^/[a-z]{2}/[a-z0-9-]+/[a-z0-9-]+/[a-z0-9-]+/service/\d+/?$"
         ),
         # /co/denver/solo-musician-for-hire
@@ -80,7 +119,7 @@ PATTERNS = {
     },
     "eventective.com": {
         # UNVERIFIED — no eventective profile URL has appeared in any data pull yet
-        "profile":   re.compile(r"^/[A-Za-z0-9-]+(?:/[A-Za-z0-9-]+)?\.html$"),
+        "profile": re.compile(r"^/[A-Za-z0-9-]+(?:/[A-Za-z0-9-]+)?\.html$"),
         # /las-vegas-nv/entertainers/
         "directory": re.compile(r"^/[a-z0-9-]+/[a-z0-9-]+/?$"),
     },
@@ -118,14 +157,18 @@ VENDOR_SOURCE_RULES: dict[str, VendorSourceRules] = {
 }
 
 
-def get_rules_for_url(page_url: str) -> VendorSourceRules | dict[str, re.Pattern[str]] | None:
+def get_rules_for_url(
+    page_url: str,
+) -> VendorSourceRules | dict[str, re.Pattern[str]] | None:
     host = normalize_source_host(page_url)
     if not host:
         return None
     return PATTERNS.get(host)
 
 
-def classify_url(arg1: VendorSourceRules | dict[str, re.Pattern[str]] | str, arg2: str | None = None) -> str:
+def classify_url(
+    arg1: VendorSourceRules | dict[str, re.Pattern[str]] | str, arg2: str | None = None
+) -> str:
     """Classify a URL as 'profile', 'directory', 'unknown_source', or 'unmatched'.
 
     Supports both:
