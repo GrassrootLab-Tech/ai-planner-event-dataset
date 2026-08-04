@@ -18,7 +18,7 @@ Reddit posts store structured `reddit_data` (top 60 comments by score, ≤3 firs
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activevate
 pip install -r requirements.txt
 python -m spacy download en_core_web_md
 cp .env.example .env   # fill in keys
@@ -74,6 +74,7 @@ python -m vendor_profiles stage --run-sample --concurrency 3
 # Scrape next batch of staged|failed profiles → html, markdown, scraped_at, status=scraped
 python -m vendor_profiles scrape
 python -m vendor_profiles scrape --batch-size 100 --concurrency 3
+
 ```
 
 Default stage pulls from `vendor_data_serp_results` (`status: ok`), picks URLs whose `results[].status` is missing or not `processed`, stages them, then sets `results[].status` to `processed`. Sample mode uses [`vendor_profiles/sample_urls.py`](vendor_profiles/sample_urls.py) and does not update SERP statuses. Scrape picks FIFO `vendors_scraped_profiles` with `status` in `staged|failed`; success writes `html`/`markdown`/`scraped_at` and `status: scraped`, failures set `status: failed`. Sources/cities/categories: `vendor_profiles/sources.py`. Regex rules: `vendor_profiles/source_rules.py`. After each stage run: `vendor_profiles/output/{timestamp}_{N}_urls_run.txt` (per-URL success/failed + Haiku cost, plus totals). Skip notes: `vendor_profiles/output/vendor_stage_report.txt`.

@@ -1,6 +1,8 @@
 .env
 .venv
 venv
+myenv
+.myenv
 .DS_Store
 __pycache__
 output/

@@ -9,7 +9,6 @@ SOURCES: list[str] = [
     "https://www.weddingwire.com",
     "https://www.thumbtack.com",
     "https://www.eventective.com",
-    "https://www.eventbookr.com",
 ]
 
 CITIES: list[dict[str, str]] = [

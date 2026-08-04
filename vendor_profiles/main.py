@@ -168,8 +168,6 @@ async def run_stage(
 
     settings = VendorSettings()
     _log_settings(settings)
-    if not settings.anthropic_api_key:
-        raise ValueError("ANTHROPIC_API_KEY is required for stage")
 
     started_at = datetime.now(timezone.utc)
     VENDOR_STAGE_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -217,14 +215,19 @@ async def run_stage(
                 concurrency,
             )
 
+        link_client = (
+            AnthropicVendorLinkClient(
+                AsyncAnthropic(api_key=settings.anthropic_api_key),
+                model=settings.anthropic_link_filter_model,
+            )
+            if settings.anthropic_api_key
+            else None
+        )
         service = VendorStageService(
             profiles_repo=profiles_repo,
             directory_repo=directory_repo,
             hasdata=HasDataClient(settings.hasdata_api_key),
-            link_client=AnthropicVendorLinkClient(
-                AsyncAnthropic(api_key=settings.anthropic_api_key),
-                model=settings.anthropic_link_filter_model,
-            ),
+            link_client=link_client,
             report_path=VENDOR_STAGE_REPORT_PATH,
         )
 

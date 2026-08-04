@@ -13,6 +13,7 @@ from vendor_profiles.source_rules import (
     TYPE_SINGLE_VENDOR,
     TYPE_UNKNOWN,
     classify_url,
+    extract_vendor_profile_urls,
     get_rules_for_url,
 )
 
@@ -40,7 +41,7 @@ class VendorStageService:
         profiles_repo: VendorsScrapedProfilesRepository,
         directory_repo: VendorsScrapedDirectoryUrlsRepository,
         hasdata: HasDataClient,
-        link_client: AnthropicVendorLinkClient,
+        link_client: AnthropicVendorLinkClient | None = None,
         report_path: Path = VENDOR_STAGE_REPORT_PATH,
     ) -> None:
         self._profiles = profiles_repo
@@ -83,7 +84,7 @@ class VendorStageService:
             )
 
         url_type = classify_url(rules, cleaned)
-        if url_type == TYPE_UNKNOWN:
+        if url_type in (TYPE_UNKNOWN, "unmatched", "unknown_source", "unknown"):
             self._append_report(f"unknown\t{cleaned}")
             return StageResult(
                 page_url=cleaned,
@@ -91,7 +92,7 @@ class VendorStageService:
                 detail="url matched neither directory nor profile regex",
             )
 
-        if url_type == TYPE_SINGLE_VENDOR:
+        if url_type in (TYPE_SINGLE_VENDOR, "profile", "single_vendor"):
             inserted = await self._profiles.insert_pending(
                 cleaned, parent_page_url=None
             )
@@ -110,18 +111,12 @@ class VendorStageService:
             all_links=scrape.links,
         )
 
-        profile_urls, usage = await self._link_client.filter_profile_urls(
-            page_title=page_title,
+        cleaned_profiles = extract_vendor_profile_urls(
+            cleaned,
             all_links=scrape.links,
+            markdown=scrape.markdown,
         )
-        cleaned_profiles: list[str] = []
-        seen: set[str] = set()
-        for raw in profile_urls:
-            profile = clean_page_url(raw)
-            if not profile or profile in seen:
-                continue
-            seen.add(profile)
-            cleaned_profiles.append(profile)
+        usage = TokenUsage()
 
         await self._directories.set_vendor_profile_urls(cleaned, cleaned_profiles)
 
