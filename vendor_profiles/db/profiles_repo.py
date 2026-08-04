@@ -9,6 +9,8 @@ from pymongo.errors import DuplicateKeyError
 from utils.logger import logger
 
 SCRAPE_ELIGIBLE_STATUSES = ("staged", "failed")
+EXTRACT_ELIGIBLE_STATUS = "scraped"
+EXTRACTED_STATUS = "extracted"
 
 
 class VendorsScrapedProfilesRepository:
@@ -96,22 +98,31 @@ class VendorsScrapedProfilesRepository:
         *,
         html: str,
         markdown: str,
+        status: str = "scraped",
+        error: str | None = None,
     ) -> bool:
+        """Persist scrape payload. status is usually scraped, or failed (e.g. access denied)."""
+        if status not in ("scraped", "failed"):
+            raise ValueError("status must be 'scraped' or 'failed'")
         now = datetime.now(timezone.utc)
+        fields: dict = {
+            "html": html,
+            "markdown": markdown,
+            "scraped_at": now,
+            "status": status,
+        }
+        update: dict
+        if status == "failed":
+            fields["error"] = error or "scrape failed"
+            update = {"$set": fields}
+        else:
+            update = {"$set": fields, "$unset": {"error": ""}}
         result = await self._collection.update_one(
             {
                 "page_url": page_url,
                 "status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)},
             },
-            {
-                "$set": {
-                    "html": html,
-                    "markdown": markdown,
-                    "scraped_at": now,
-                    "status": "scraped",
-                },
-                "$unset": {"error": ""},
-            },
+            update,
         )
         return result.modified_count == 1
 
@@ -120,3 +131,17 @@ class VendorsScrapedProfilesRepository:
             {"page_url": page_url},
             {"$set": {"status": "failed", "error": error}},
         )
+
+    async def find_scraped_by_page_url(self, page_url: str) -> dict | None:
+        return await self._collection.find_one(
+            {"page_url": page_url},
+            {"page_url": 1, "markdown": 1, "status": 1},
+        )
+
+    async def mark_extracted(self, page_url: str) -> bool:
+        """Transition scraped → extracted. Returns False if not currently scraped."""
+        result = await self._collection.update_one(
+            {"page_url": page_url, "status": EXTRACT_ELIGIBLE_STATUS},
+            {"$set": {"status": EXTRACTED_STATUS}},
+        )
+        return result.modified_count == 1

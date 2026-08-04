@@ -1,8 +1,9 @@
-"""CLI for vendor profile SERP + stage + scrape pipeline.
+"""CLI for vendor profile SERP + stage + scrape + extract pipeline.
 
   python -m vendor_profiles stage [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles stage --run-sample [--concurrency 3]
   python -m vendor_profiles scrape [--batch-size 100] [--concurrency 3]
+  python -m vendor_profiles extract --run-sample [--concurrency 3]
   python -m vendor_profiles fetch-serp [--workers 4]
   python -m vendor_profiles poll-serp [--workers 4]
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,14 +26,21 @@ from utils.concurrency import map_concurrent
 from utils.logger import log_pretty, logger, set_log_stage, setup_logging
 from utils.pipeline_cost import TokenUsage, usd_for_model
 from utils.url import clean_page_url
+from vendor_profiles.clients.anthropic_vendor_extract_client import (
+    AnthropicVendorExtractClient,
+)
 from vendor_profiles.clients.anthropic_vendor_link_client import AnthropicVendorLinkClient
 from vendor_profiles.config import VendorSettings
 from vendor_profiles.db.directory_urls_repo import VendorsScrapedDirectoryUrlsRepository
+from vendor_profiles.db.extracted_profiles_repo import (
+    VendorsExtractedProfilesRepository,
+)
 from vendor_profiles.db.profiles_repo import VendorsScrapedProfilesRepository
 from vendor_profiles.db.serp_results_repo import StagePage, VendorsSerpResultsRepository
 from vendor_profiles.sample_urls import PAGE_URLS
 from vendor_profiles.scripts.fetch_serp import DEFAULT_WORKERS, run_fetch_serp
 from vendor_profiles.scripts.poll_serp import run_poll_serp
+from vendor_profiles.services.extract_service import ExtractOutcome, VendorExtractService
 from vendor_profiles.services.scrape_service import ScrapeOutcome, VendorScrapeService
 from vendor_profiles.services.stage_service import (
     VENDOR_OUTPUT_DIR,
@@ -58,6 +67,9 @@ def _log_settings(settings: VendorSettings) -> None:
             ),
             "vendors_scraped_directory_urls_collection": (
                 settings.vendors_scraped_directory_urls_collection
+            ),
+            "vendors_extracted_profiles_collection": (
+                settings.vendors_extracted_profiles_collection
             ),
             "anthropic_link_filter_model": settings.anthropic_link_filter_model,
             "hasdata_api_key": f"{settings.hasdata_api_key[:6]}...",
@@ -374,6 +386,175 @@ async def run_scrape_batch(
         await mongo.disconnect()
 
 
+def _write_extract_cost_report(
+    results: list[ExtractOutcome],
+    *,
+    model: str,
+    started_at: datetime,
+) -> Path:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = started_at.strftime("%Y%m%d_%H%M%S")
+    path = OUTPUT_DIR / f"{stamp}_extracted_cost.txt"
+
+    lines: list[str] = [
+        f"vendor_profiles extract run — {started_at.isoformat()}",
+        f"model: {model}",
+        f"urls: {len(results)}",
+        "",
+        "per_url:",
+    ]
+
+    total_usage = TokenUsage()
+    extracted = 0
+    failed = 0
+    skipped = 0
+    for result in results:
+        if result.outcome == "extracted":
+            extracted += 1
+            status = "success"
+        elif result.outcome == "skipped":
+            skipped += 1
+            status = "skipped"
+        else:
+            failed += 1
+            status = "failed"
+        cost = usd_for_model(model, result.haiku_usage)
+        total_usage = total_usage + result.haiku_usage
+        lines.append(
+            f"  [{status}] {result.page_url} | outcome={result.outcome}"
+            f" | haiku_input={result.haiku_usage.input_tokens}"
+            f" | haiku_output={result.haiku_usage.output_tokens}"
+            f" | haiku_cost_usd={cost:.6f}"
+            + (f" | detail={result.detail}" if result.detail else "")
+        )
+
+    total_cost = usd_for_model(model, total_usage)
+    lines.extend(
+        [
+            "",
+            "summary:",
+            f"  total_urls: {len(results)}",
+            f"  extracted: {extracted}",
+            f"  skipped: {skipped}",
+            f"  failed: {failed}",
+            f"  haiku_input_tokens: {total_usage.input_tokens}",
+            f"  haiku_output_tokens: {total_usage.output_tokens}",
+            f"  total_haiku_cost_usd: {total_cost:.6f}",
+        ]
+    )
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
+    set_log_stage("vendor_extract")
+    if concurrency < 1:
+        raise ValueError("--concurrency must be >= 1")
+
+    settings = VendorSettings()
+    _log_settings(settings)
+    if not settings.anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY is required for extract")
+
+    started_at = datetime.now(timezone.utc)
+    pages = normalize_pages(
+        PAGE_URLS, source="vendor_profiles.sample_urls.PAGE_URLS"
+    )
+    if not pages:
+        logger.warning("sample_urls.PAGE_URLS is empty — nothing to extract")
+        return []
+
+    mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
+    await mongo.connect()
+    try:
+        profiles_repo = VendorsScrapedProfilesRepository(
+            mongo.db[settings.vendors_scraped_profiles_collection]
+        )
+        extracted_repo = VendorsExtractedProfilesRepository(
+            mongo.db[settings.vendors_extracted_profiles_collection]
+        )
+        await profiles_repo.ensure_indexes()
+        await extracted_repo.ensure_indexes()
+
+        total = len(pages)
+        logger.info(
+            "Vendor extract (sample): %d URLs concurrency=%d",
+            total,
+            concurrency,
+        )
+
+        service = VendorExtractService(
+            profiles_repo=profiles_repo,
+            extracted_repo=extracted_repo,
+            extract_client=AnthropicVendorExtractClient(
+                AsyncAnthropic(api_key=settings.anthropic_api_key),
+                model=settings.anthropic_link_filter_model,
+            ),
+        )
+
+        progress_lock = asyncio.Lock()
+        progress_done = 0
+
+        async def extract_one(page: StagePage) -> ExtractOutcome:
+            nonlocal progress_done
+            outcome = await service.extract_url(page.page_url)
+            async with progress_lock:
+                progress_done += 1
+                done = progress_done
+            status = "ok" if outcome.outcome == "extracted" else outcome.outcome
+            print(
+                f"processing [{done} / {total}] {status} {page.page_url}"
+                + (f" | {outcome.detail}" if outcome.detail else "")
+            )
+            if outcome.profile_payload is not None:
+                print(
+                    json.dumps(
+                        {
+                            "page_url": outcome.page_url,
+                            **outcome.profile_payload,
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+            return outcome
+
+        results = await map_concurrent(pages, concurrency, extract_one)
+
+        report_path = _write_extract_cost_report(
+            results,
+            model=settings.anthropic_link_filter_model,
+            started_at=started_at,
+        )
+
+        total_usage = TokenUsage()
+        tallies: dict[str, int] = {}
+        for result in results:
+            tallies[result.outcome] = tallies.get(result.outcome, 0) + 1
+            total_usage = total_usage + result.haiku_usage
+
+        total_haiku_cost = usd_for_model(
+            settings.anthropic_link_filter_model, total_usage
+        )
+        summary = {
+            "mode": "sample",
+            "url_count": len(results),
+            "haiku_input_tokens": total_usage.input_tokens,
+            "haiku_output_tokens": total_usage.output_tokens,
+            "total_haiku_cost_usd": round(total_haiku_cost, 6),
+            "cost_report_path": str(report_path),
+            **tallies,
+        }
+        log_pretty("Vendor extract summary", summary)
+        print("Vendor extract summary:")
+        for key, value in summary.items():
+            print(f"  {key}: {value}")
+        return results
+    finally:
+        await mongo.disconnect()
+
+
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(
@@ -426,6 +607,26 @@ def main() -> None:
         help="Max URLs to scrape in parallel (default: 3)",
     )
 
+    extract_parser = sub.add_parser(
+        "extract",
+        help=(
+            "Extract structured VendorProfile from scraped markdown via Haiku "
+            "(sample_urls only for now)"
+        ),
+    )
+    extract_parser.add_argument(
+        "--run-sample",
+        action="store_true",
+        required=True,
+        help="Extract URLs from vendor_profiles/sample_urls.py (required)",
+    )
+    extract_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="Max URLs to extract in parallel (default: 3)",
+    )
+
     fetch_parser = sub.add_parser(
         "fetch-serp",
         help="Interactively queue DataForSEO SERP tasks",
@@ -468,6 +669,13 @@ def main() -> None:
                     concurrency=args.concurrency,
                     batch_size=args.batch_size,
                 )
+            )
+            if sum(1 for r in results if not r.ok):
+                sys.exit(1)
+        elif args.command == "extract":
+            set_log_stage("vendor_extract")
+            results = asyncio.run(
+                run_extract_sample(concurrency=args.concurrency)
             )
             if sum(1 for r in results if not r.ok):
                 sys.exit(1)

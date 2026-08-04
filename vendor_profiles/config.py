@@ -17,4 +17,5 @@ class VendorSettings(BaseSettings):
     vendor_data_serp_results_collection: str = "vendor_data_serp_results"
     vendors_scraped_profiles_collection: str = "vendors_scraped_profiles"
     vendors_scraped_directory_urls_collection: str = "vendors_scraped_directory_urls"
+    vendors_extracted_profiles_collection: str = "vendors_extracted_profiles"
     anthropic_link_filter_model: str = "claude-haiku-4-5"

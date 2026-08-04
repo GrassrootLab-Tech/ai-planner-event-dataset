@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 
@@ -21,21 +22,50 @@ class DirectoryScrapeResult:
     links: list[str]
 
 
+# These hosts often block datacenter IPs (Access Denied / Akamai).
+_RESIDENTIAL_PROXY_HOSTS = frozenset(
+    {
+        "theknot.com",
+        "weddingwire.com",
+        "thumbtack.com",
+    }
+)
+
+
+def proxy_type_for_url(page_url: str) -> str:
+    """Return HasData proxyType (residential for knot/weddingwire/thumbtack)."""
+    host = urlparse(page_url).netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host in _RESIDENTIAL_PROXY_HOSTS or any(
+        host.endswith(f".{h}") for h in _RESIDENTIAL_PROXY_HOSTS
+    ):
+        return "residential"
+    return "datacenter"
+
+
 class HasDataClient:
     BASE_URL = "https://api.hasdata.com/scrape/web"
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
 
-    async def scrape(self, page_url: str) -> ScrapeResult:
+    async def scrape(
+        self,
+        page_url: str,
+        *,
+        proxy_type: str | None = None,
+    ) -> ScrapeResult:
+        proxy = proxy_type or proxy_type_for_url(page_url)
         payload = {
             "url": page_url,
             "outputFormat": ["html", "markdown"],
-            "proxyType": "datacenter",
+            "proxyType": proxy,
             "proxyCountry": "US",
             "jsRendering": True,
             "blockResources": True,
             "blockAds": True,
+            "removeBase64Images": True,
         }
         headers = {
             "Content-Type": "application/json",
@@ -77,17 +107,24 @@ class HasDataClient:
 
         return ScrapeResult(raw_html=raw_html, markdown=markdown)
 
-    async def scrape_directory(self, page_url: str) -> DirectoryScrapeResult:
+    async def scrape_directory(
+        self,
+        page_url: str,
+        *,
+        proxy_type: str | None = None,
+    ) -> DirectoryScrapeResult:
         """Markdown + extracted links only (no HTML required)."""
+        proxy = proxy_type or proxy_type_for_url(page_url)
         payload = {
             "url": page_url,
             "outputFormat": ["json", "markdown"],
             "extractLinks": True,
-            "proxyType": "datacenter",
+            "proxyType": proxy,
             "proxyCountry": "US",
             "jsRendering": True,
             "blockResources": True,
             "blockAds": True,
+            "removeBase64Images": True,
         }
         headers = {
             "Content-Type": "application/json",
