@@ -96,7 +96,13 @@ _BREADCRUMB_ITEM_RE = re.compile(
 class TheBashProfileParser(VendorProfileParser):
     source_host = "thebash.com"
 
-    def parse(self, page_url: str, markdown: str) -> VendorProfile:
+    def parse(
+        self,
+        page_url: str,
+        markdown: str,
+        *,
+        html: str | None = None,
+    ) -> VendorProfile:
         body = self._profile_body(markdown)
         breadcrumbs = self._parse_breadcrumbs(body)
         h1 = self._parse_h1(body)

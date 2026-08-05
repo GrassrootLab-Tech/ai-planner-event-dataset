@@ -20,7 +20,9 @@ Omit headings when the source has no distinct title.
 booking notes.
 - faqs: list of {title?, content?, order}; omit title when absent.
 - influences_and_inspiration: list of strings when the page lists influences.
-- team: list of {name?, role?} when personnel/team members are listed.
+- team: list of {name?, role?, bio?} when personnel/team members are listed.
+- available_in: list of market/city names when the page lists service markets.
+- press_and_recognition: list of {title?, publisher?, url?} for press or awards.
 - years_in_business: {start_year, start_month} when known.
 - gig_length: {min_minutes, max_minutes} when the page lists a gig length range.
 - unions: list of union memberships when listed.

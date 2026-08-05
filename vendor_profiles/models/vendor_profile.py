@@ -123,6 +123,13 @@ class SetupRequirement(BaseModel):
 class TeamMember(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
+    bio: Optional[str] = None
+
+
+class PressMention(BaseModel):
+    title: Optional[str] = None
+    publisher: Optional[str] = None
+    url: Optional[str] = None
 
 
 class PortfolioFile(BaseModel):
@@ -176,6 +183,8 @@ class VendorProfile(BaseModel):
     unions: Optional[list[str]] = None
     influences_and_inspiration: Optional[list[str]] = None
     team: Optional[list[TeamMember]] = None
+    available_in: Optional[list[str]] = None
+    press_and_recognition: Optional[list[PressMention]] = None
 
     # Media
     portfolio_files: Optional[list[PortfolioFile]] = None

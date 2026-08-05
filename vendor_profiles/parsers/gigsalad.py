@@ -139,7 +139,13 @@ _FOOTER_START = "With us, **planners have the confidence"
 class GigSaladProfileParser(VendorProfileParser):
     source_host = "gigsalad.com"
 
-    def parse(self, page_url: str, markdown: str) -> VendorProfile:
+    def parse(
+        self,
+        page_url: str,
+        markdown: str,
+        *,
+        html: str | None = None,
+    ) -> VendorProfile:
         body = self._profile_body(markdown)
         business_name = self._parse_business_name(body)
         if not business_name:

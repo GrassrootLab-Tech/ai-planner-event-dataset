@@ -135,7 +135,7 @@ class VendorsScrapedProfilesRepository:
     async def find_scraped_by_page_url(self, page_url: str) -> dict | None:
         return await self._collection.find_one(
             {"page_url": page_url},
-            {"page_url": 1, "markdown": 1, "status": 1},
+            {"page_url": 1, "markdown": 1, "html": 1, "status": 1},
         )
 
     async def mark_extracted(self, page_url: str) -> bool:

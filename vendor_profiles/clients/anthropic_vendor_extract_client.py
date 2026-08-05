@@ -221,6 +221,8 @@ class AnthropicVendorExtractClient:
             "unions",
             "influences_and_inspiration",
             "team",
+            "available_in",
+            "press_and_recognition",
         ):
             value = out.get(list_key)
             if isinstance(value, dict):

@@ -90,16 +90,19 @@ class VendorExtractService:
                 detail="empty or missing markdown",
             )
 
+        html = doc.get("html") if isinstance(doc.get("html"), str) else None
+
         parser = self._get_parser(page_url)
         try:
             if parser is not None:
                 logger.info(
-                    "Rules extract page_url=%s parser=%s raw_chars=%d",
+                    "Rules extract page_url=%s parser=%s raw_chars=%d html_chars=%d",
                     page_url,
                     parser.source_host,
                     len(markdown),
+                    len(html) if html else 0,
                 )
-                profile = parser.parse(page_url, markdown)
+                profile = parser.parse(page_url, markdown, html=html)
                 usage = TokenUsage()
                 method = "rules"
             else:
