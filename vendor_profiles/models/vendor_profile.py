@@ -19,14 +19,14 @@ class Category(BaseModel):
 
 
 class FAQ(BaseModel):
-    title: str
-    content: str
+    title: Optional[str] = None
+    content: Optional[str] = None
     order: int = 0
 
 
 class Highlight(BaseModel):
-    reason_heading: str
-    reason_description: str
+    reason_heading: Optional[str] = None
+    reason_description: Optional[str] = None
 
 
 class Location(BaseModel):
@@ -43,7 +43,7 @@ class ServiceArea(BaseModel):
     state: Optional[str] = None
     state_code: Optional[str] = None
     service_pincode: Optional[str] = None
-    travel_radius: Optional[int] = None
+    travel_radius: Optional[str] = None  # e.g. "100 miles", "1.5 hours"
     can_travel_nationwide: Optional[bool] = None
     can_travel_statewide: Optional[bool] = None
 
@@ -53,9 +53,19 @@ class YearsInBusiness(BaseModel):
     start_month: Optional[int] = None
 
 
+class GigLength(BaseModel):
+    min_minutes: Optional[int] = None
+    max_minutes: Optional[int] = None
+
+
 class Price(BaseModel):
     amount: float
     per: str  # event | hour | day | person | etc.
+
+
+class PriceRange(BaseModel):
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
 
 
 class TimeSlot(BaseModel):
@@ -86,28 +96,33 @@ class SocialMediaLink(BaseModel):
 
 
 class Package(BaseModel):
-    title: str
-    description: str
+    title: Optional[str] = None
+    description: Optional[str] = None
     price: Optional[Price] = None
     prices: list[Price] = Field(default_factory=list)
     offerings: list[str] = Field(default_factory=list)
 
 
 class Addon(BaseModel):
-    title: str
-    description: str
+    title: Optional[str] = None
+    description: Optional[str] = None
     amount: float
 
 
 class MandatoryFee(BaseModel):
-    title: str
-    description: str
+    title: Optional[str] = None
+    description: Optional[str] = None
     amount: float
 
 
 class SetupRequirement(BaseModel):
-    title: str
-    description: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
+class TeamMember(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
 
 
 class PortfolioFile(BaseModel):
@@ -149,12 +164,18 @@ class VendorProfile(BaseModel):
     services_provided: Optional[list[str]] = None
     tagline: Optional[str] = None
     description: Optional[str] = None
-    reason_to_book_me: Optional[list[Highlight]] = None
+    about: Optional[str] = None
+    reasons_to_book_me: Optional[list[Highlight]] = None
+    booking_notes: Optional[list[str]] = None
     faqs: Optional[list[FAQ]] = None
     languages: Optional[list[str]] = None
     genres_or_styles: Optional[list[str]] = None
     song_list: Optional[list[str]] = None
     years_in_business: Optional[YearsInBusiness] = None
+    gig_length: Optional[GigLength] = None
+    unions: Optional[list[str]] = None
+    influences_and_inspiration: Optional[list[str]] = None
+    team: Optional[list[TeamMember]] = None
 
     # Media
     portfolio_files: Optional[list[PortfolioFile]] = None
@@ -177,6 +198,7 @@ class VendorProfile(BaseModel):
 
     # Pricing
     prices: Optional[list[Price]] = None
+    price_range: Optional[PriceRange] = None
     packages: Optional[list[Package]] = None
     available_addons: Optional[list[Addon]] = None
     mandatory_fees: Optional[list[MandatoryFee]] = None

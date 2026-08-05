@@ -98,6 +98,30 @@ def parse_date(text: str) -> date | None:
     return None
 
 
+_MD_ESCAPE_RE = re.compile(r"\\([.\-_*`\[\]()#!])")
+
+
+def strip_md_escapes(text: str) -> str:
+    """Unescape common markdown escapes: \\-, 1\\., \\. → literal chars."""
+    if not text:
+        return ""
+    return _MD_ESCAPE_RE.sub(r"\1", text)
+
+
+def paragraphs(text: str) -> list[str]:
+    """Split text into non-empty paragraphs (blank-line separated), cleaned."""
+    if not text:
+        return []
+    cleaned = strip_md_escapes(unescape(text))
+    parts: list[str] = []
+    for block in re.split(r"\n\s*\n", cleaned):
+        para = re.sub(r"[ \t]*\n[ \t]*", " ", block).strip()
+        para = re.sub(r"[ \t]+", " ", para)
+        if para:
+            parts.append(para)
+    return parts
+
+
 def section(markdown: str, heading: str, *, level: int | None = None) -> str:
     """Slice markdown body between a heading and the next same-or-higher heading.
 

@@ -24,6 +24,7 @@ from vendor_profiles.parsers.text import (
     strip_media_variant,
     unescape,
 )
+from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, US_STATE_NAMES
 
 _SENTINELS = frozenset(
     {
@@ -43,7 +44,7 @@ _H1_RE = re.compile(
     re.MULTILINE,
 )
 _TRAVEL_RE = re.compile(
-    r"Will travel up to\s+(\d+)\s+miles",
+    r"Will travel up to\s+(\d+)\s+(miles?)",
     re.IGNORECASE,
 )
 _AVG_RATING_RE = re.compile(
@@ -90,60 +91,6 @@ _BREADCRUMB_ITEM_RE = re.compile(
     r"^\d+\.\s+(?:\[(?P<link>[^\]]+)\]\([^)]+\)|(?P<plain>.+))\s*$",
     re.MULTILINE,
 )
-_US_STATE_NAMES = {
-    "alabama": "AL",
-    "alaska": "AK",
-    "arizona": "AZ",
-    "arkansas": "AR",
-    "california": "CA",
-    "colorado": "CO",
-    "connecticut": "CT",
-    "delaware": "DE",
-    "florida": "FL",
-    "georgia": "GA",
-    "hawaii": "HI",
-    "idaho": "ID",
-    "illinois": "IL",
-    "indiana": "IN",
-    "iowa": "IA",
-    "kansas": "KS",
-    "kentucky": "KY",
-    "louisiana": "LA",
-    "maine": "ME",
-    "maryland": "MD",
-    "massachusetts": "MA",
-    "michigan": "MI",
-    "minnesota": "MN",
-    "mississippi": "MS",
-    "missouri": "MO",
-    "montana": "MT",
-    "nebraska": "NE",
-    "nevada": "NV",
-    "new hampshire": "NH",
-    "new jersey": "NJ",
-    "new mexico": "NM",
-    "new york": "NY",
-    "north carolina": "NC",
-    "north dakota": "ND",
-    "ohio": "OH",
-    "oklahoma": "OK",
-    "oregon": "OR",
-    "pennsylvania": "PA",
-    "rhode island": "RI",
-    "south carolina": "SC",
-    "south dakota": "SD",
-    "tennessee": "TN",
-    "texas": "TX",
-    "utah": "UT",
-    "vermont": "VT",
-    "virginia": "VA",
-    "washington": "WA",
-    "west virginia": "WV",
-    "wisconsin": "WI",
-    "wyoming": "WY",
-    "district of columbia": "DC",
-}
-_STATE_CODE_TO_NAME = {code: name.title() for name, code in _US_STATE_NAMES.items()}
 
 
 class TheBashProfileParser(VendorProfileParser):
@@ -373,10 +320,10 @@ class TheBashProfileParser(VendorProfileParser):
                     state_name = state_name[: -len(svc_sing)].strip()
 
         if not state_name and state_code:
-            state_name = _STATE_CODE_TO_NAME.get(state_code)
+            state_name = STATE_CODE_TO_NAME.get(state_code)
 
         if not state_code and state_name:
-            state_code = _US_STATE_NAMES.get(state_name.lower())
+            state_code = US_STATE_NAMES.get(state_name.lower())
 
         raw_location = None
         if city and state_code:
@@ -396,7 +343,10 @@ class TheBashProfileParser(VendorProfileParser):
         travel_radius = None
         travel_match = _TRAVEL_RE.search(body)
         if travel_match:
-            travel_radius = int(travel_match.group(1))
+            unit = travel_match.group(2).lower()
+            if unit == "mile":
+                unit = "miles"
+            travel_radius = f"{travel_match.group(1)} {unit}"
 
         service_area = None
         if city or state_name or state_code or travel_radius is not None:

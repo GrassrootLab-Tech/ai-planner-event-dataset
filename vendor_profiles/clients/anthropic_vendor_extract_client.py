@@ -216,7 +216,11 @@ class AnthropicVendorExtractClient:
             "social_media",
             "past_events",
             "upcoming_events",
-            "reason_to_book_me",
+            "reasons_to_book_me",
+            "booking_notes",
+            "unions",
+            "influences_and_inspiration",
+            "team",
         ):
             value = out.get(list_key)
             if isinstance(value, dict):
@@ -239,23 +243,18 @@ class AnthropicVendorExtractClient:
                     coerced_p.append(item)
             out["portfolio_files"] = coerced_p or None
 
-        # reason_to_book_me: bare string items → highlight object
-        highlights = out.get("reason_to_book_me")
+        # reasons_to_book_me: bare string items → highlight object (description only)
+        highlights = out.get("reasons_to_book_me")
         if isinstance(highlights, list):
             coerced_h: list[Any] = []
             for item in highlights:
                 if isinstance(item, str):
                     text = item.strip()
                     if text:
-                        coerced_h.append(
-                            {
-                                "reason_heading": text,
-                                "reason_description": text,
-                            }
-                        )
+                        coerced_h.append({"reason_description": text})
                 elif isinstance(item, dict):
                     coerced_h.append(item)
-            out["reason_to_book_me"] = coerced_h or None
+            out["reasons_to_book_me"] = coerced_h or None
 
         for obj_key in (
             "location",
@@ -263,6 +262,8 @@ class AnthropicVendorExtractClient:
             "logistic_details",
             "years_in_business",
             "weekly_hours",
+            "gig_length",
+            "price_range",
         ):
             value = out.get(obj_key)
             if value == [] or value == {}:
