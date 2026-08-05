@@ -9,6 +9,10 @@ from utils.url import clean_page_url
 from vendor_profiles.clients.anthropic_vendor_link_client import AnthropicVendorLinkClient
 from vendor_profiles.db.directory_urls_repo import VendorsScrapedDirectoryUrlsRepository
 from vendor_profiles.db.profiles_repo import VendorsScrapedProfilesRepository
+from vendor_profiles.services.scrape_service import (
+    EMPTY_MARKDOWN_ERROR,
+    is_empty_markdown,
+)
 from vendor_profiles.source_rules import (
     TYPE_SINGLE_VENDOR,
     TYPE_UNKNOWN,
@@ -105,10 +109,25 @@ class VendorStageService:
             )
 
         scrape = await self._hasdata.scrape_directory(cleaned)
+        if is_empty_markdown(scrape.markdown):
+            await self._directories.upsert_scrape(
+                page_url=cleaned,
+                markdown=scrape.markdown,
+                all_links=scrape.links,
+                status="failed",
+                error=EMPTY_MARKDOWN_ERROR,
+            )
+            return StageResult(
+                page_url=cleaned,
+                outcome="error",
+                detail=EMPTY_MARKDOWN_ERROR,
+            )
+
         await self._directories.upsert_scrape(
             page_url=cleaned,
             markdown=scrape.markdown,
             all_links=scrape.links,
+            status="ok",
         )
 
         cleaned_profiles = extract_vendor_profile_urls(

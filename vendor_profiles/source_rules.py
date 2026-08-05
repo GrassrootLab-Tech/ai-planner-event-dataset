@@ -100,21 +100,21 @@ PATTERNS = {
     "gigsalad.com": {
     # /chuck_roy_denver
     # /son_of_a_brisket_elite_catering_barbecue_brook
-    # /matt_cobos_denver/contact
     #
     # Vendor slugs are always snake_case (underscores, ≥ 2 tokens).
     # Nav and category paths use hyphens or TitleCase — they never pass the
     # structural guard, and the blocklist catches any edge-case single-word slug.
     "profile": re.compile(
         rf"^/(?!(?:{_GIGSALAD_NON_VENDOR_ALT})(?:/|$))"
-        r"[a-z0-9]+(?:_[a-z0-9]+)+(?:/contact)?/?$",
+        r"[a-z0-9]+(?:_[a-z0-9]+)+/?$",
         re.IGNORECASE,
     ),
     # /Event-Services/Food-Truck/CO/Greeley  (4-segment with state)
     # /Event-Services/Food-Truck             (2-segment browse)
     # /Hire/College-Entertainment
+    # /Event-Services/waitstaff/CO/Fort+Collins  (+ = space in city)
     "directory": re.compile(
-        r"^/[A-Za-z0-9-]+(?:/[A-Za-z0-9-]+){1,3}/?$"
+        r"^/[A-Za-z0-9+-]+(?:/[A-Za-z0-9+-]+){1,3}/?$"
     ),
 },
     "partyslate.com": {
@@ -134,7 +134,7 @@ PATTERNS = {
     "zola.com": {
         # /wedding-vendors/wedding-bands-djs/nexus-strings
         "profile": re.compile(
-            r"^/wedding-vendors/(?!search/)[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)+/?$"
+            r"^/wedding-vendors/(?!search/)[^/]+/[^/?#]+/?$"
         ),
         # /wedding-vendors/search/denver-co--wedding-bands-djs
         "directory": re.compile(r"^/wedding-vendors/search/[a-z0-9-]+/?$"),

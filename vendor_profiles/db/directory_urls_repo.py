@@ -32,20 +32,28 @@ class VendorsScrapedDirectoryUrlsRepository:
         page_url: str,
         markdown: str,
         all_links: list[str],
+        status: str = "ok",
+        error: str | None = None,
     ) -> None:
         await self.ensure_indexes()
         now = datetime.now(timezone.utc)
+        fields: dict = {
+            "page_url": page_url,
+            "scraped_at": now,
+            "all_links": all_links,
+            "vendor_profile_urls": [],
+            "markdown": markdown,
+            "status": status,
+        }
+        update: dict
+        if status == "failed":
+            fields["error"] = error or "scrape failed"
+            update = {"$set": fields}
+        else:
+            update = {"$set": fields, "$unset": {"error": ""}}
         await self._collection.update_one(
             {"page_url": page_url},
-            {
-                "$set": {
-                    "page_url": page_url,
-                    "scraped_at": now,
-                    "all_links": all_links,
-                    "vendor_profile_urls": [],
-                    "markdown": markdown,
-                }
-            },
+            update,
             upsert=True,
         )
 
