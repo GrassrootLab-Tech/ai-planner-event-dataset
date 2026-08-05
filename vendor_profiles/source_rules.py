@@ -51,7 +51,40 @@ _THEBASH_NON_VENDOR_FIRST_ALT = "|".join(
     sorted(_THEBASH_NON_VENDOR_FIRST_SEGMENTS, key=len, reverse=True)
 )
 
+# Paste this block just above the PATTERNS dict (after the thebash equivalent)
 
+# First path segment on gigsalad.com that is never a vendor profile.
+_GIGSALAD_NON_VENDOR_SLUGS = frozenset(
+    {
+        "about",
+        "blog",
+        "book-entertainers",
+        "book-music",
+        "book-services",
+        "book-speakers",
+        "contact",
+        "event-services",
+        "help",
+        "hire",
+        "how-it-works",
+        "join",
+        "login",
+        "partners",
+        "party-ideas",
+        "pricing",
+        "privacy",
+        "quick-quote",
+        "search",
+        "services",
+        "sitemap",
+        "terms",
+        "testimonials",
+        "variety",
+    }
+)
+_GIGSALAD_NON_VENDOR_ALT = "|".join(
+    sorted(_GIGSALAD_NON_VENDOR_SLUGS, key=len, reverse=True)
+)
 # For each domain: (profile_regex, directory_regex)
 # All patterns match urlparse(url).path only (classify_url never tests the full URL).
 PATTERNS = {
@@ -65,16 +98,25 @@ PATTERNS = {
         "directory": re.compile(r"^/search/[a-z0-9]+(?:-[a-z0-9]+)*/?$"),
     },
     "gigsalad.com": {
-        # /chuck_roy_denver, /leah_althoff_stand_up_comedy_denver, /matt_cobos_denver/contact
-        "profile": re.compile(
-            r"^/[a-z0-9]+(?:[-_][a-z0-9]+)*(?:/contact)?/?$",
-            re.IGNORECASE,
-        ),
-        # /Comedians-Emcees/Stand-Up-Comedians/CO/Denver
-        "directory": re.compile(
-            r"^/[A-Za-z0-9-]+/[A-Za-z0-9-]+/[A-Z]{2}/[A-Za-z0-9-]+/?$"
-        ),
-    },
+    # /chuck_roy_denver
+    # /son_of_a_brisket_elite_catering_barbecue_brook
+    # /matt_cobos_denver/contact
+    #
+    # Vendor slugs are always snake_case (underscores, ≥ 2 tokens).
+    # Nav and category paths use hyphens or TitleCase — they never pass the
+    # structural guard, and the blocklist catches any edge-case single-word slug.
+    "profile": re.compile(
+        rf"^/(?!(?:{_GIGSALAD_NON_VENDOR_ALT})(?:/|$))"
+        r"[a-z0-9]+(?:_[a-z0-9]+)+(?:/contact)?/?$",
+        re.IGNORECASE,
+    ),
+    # /Event-Services/Food-Truck/CO/Greeley  (4-segment with state)
+    # /Event-Services/Food-Truck             (2-segment browse)
+    # /Hire/College-Entertainment
+    "directory": re.compile(
+        r"^/[A-Za-z0-9-]+(?:/[A-Za-z0-9-]+){1,3}/?$"
+    ),
+},
     "partyslate.com": {
         # /vendors/good-musicians
         "profile": re.compile(r"^/vendors/[a-z0-9]+(?:-[a-z0-9]+)+/?$"),
