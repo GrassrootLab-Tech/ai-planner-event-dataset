@@ -408,10 +408,16 @@ def _write_extract_cost_report(
     extracted = 0
     failed = 0
     skipped = 0
+    rules_count = 0
+    haiku_count = 0
     for result in results:
         if result.outcome == "extracted":
             extracted += 1
             status = "success"
+            if result.extraction_method == "rules":
+                rules_count += 1
+            elif result.extraction_method == "haiku":
+                haiku_count += 1
         elif result.outcome == "skipped":
             skipped += 1
             status = "skipped"
@@ -420,8 +426,10 @@ def _write_extract_cost_report(
             status = "failed"
         cost = usd_for_model(model, result.haiku_usage)
         total_usage = total_usage + result.haiku_usage
+        method = result.extraction_method or "-"
         lines.append(
             f"  [{status}] {result.page_url} | outcome={result.outcome}"
+            f" | method={method}"
             f" | haiku_input={result.haiku_usage.input_tokens}"
             f" | haiku_output={result.haiku_usage.output_tokens}"
             f" | haiku_cost_usd={cost:.6f}"
@@ -435,6 +443,8 @@ def _write_extract_cost_report(
             "summary:",
             f"  total_urls: {len(results)}",
             f"  extracted: {extracted}",
+            f"  extracted_via_rules: {rules_count}",
+            f"  extracted_via_haiku: {haiku_count}",
             f"  skipped: {skipped}",
             f"  failed: {failed}",
             f"  haiku_input_tokens: {total_usage.input_tokens}",
@@ -454,8 +464,6 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
 
     settings = VendorSettings()
     _log_settings(settings)
-    if not settings.anthropic_api_key:
-        raise ValueError("ANTHROPIC_API_KEY is required for extract")
 
     started_at = datetime.now(timezone.utc)
     pages = normalize_pages(
@@ -464,6 +472,18 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
     if not pages:
         logger.warning("sample_urls.PAGE_URLS is empty — nothing to extract")
         return []
+
+    extract_client: AnthropicVendorExtractClient | None = None
+    if settings.anthropic_api_key:
+        extract_client = AnthropicVendorExtractClient(
+            AsyncAnthropic(api_key=settings.anthropic_api_key),
+            model=settings.anthropic_link_filter_model,
+        )
+    else:
+        logger.warning(
+            "ANTHROPIC_API_KEY unset — rule parsers only; "
+            "sources without a parser will be skipped"
+        )
 
     mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
     await mongo.connect()
@@ -487,10 +507,7 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
         service = VendorExtractService(
             profiles_repo=profiles_repo,
             extracted_repo=extracted_repo,
-            extract_client=AnthropicVendorExtractClient(
-                AsyncAnthropic(api_key=settings.anthropic_api_key),
-                model=settings.anthropic_link_filter_model,
-            ),
+            extract_client=extract_client,
         )
 
         progress_lock = asyncio.Lock()
@@ -503,8 +520,13 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
                 progress_done += 1
                 done = progress_done
             status = "ok" if outcome.outcome == "extracted" else outcome.outcome
+            method = (
+                f" method={outcome.extraction_method}"
+                if outcome.extraction_method
+                else ""
+            )
             print(
-                f"processing [{done} / {total}] {status} {page.page_url}"
+                f"processing [{done} / {total}] {status}{method} {page.page_url}"
                 + (f" | {outcome.detail}" if outcome.detail else "")
             )
             if outcome.profile_payload is not None:
@@ -530,9 +552,15 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
 
         total_usage = TokenUsage()
         tallies: dict[str, int] = {}
+        rules_count = 0
+        haiku_count = 0
         for result in results:
             tallies[result.outcome] = tallies.get(result.outcome, 0) + 1
             total_usage = total_usage + result.haiku_usage
+            if result.extraction_method == "rules":
+                rules_count += 1
+            elif result.extraction_method == "haiku":
+                haiku_count += 1
 
         total_haiku_cost = usd_for_model(
             settings.anthropic_link_filter_model, total_usage
@@ -540,6 +568,8 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
         summary = {
             "mode": "sample",
             "url_count": len(results),
+            "extracted_via_rules": rules_count,
+            "extracted_via_haiku": haiku_count,
             "haiku_input_tokens": total_usage.input_tokens,
             "haiku_output_tokens": total_usage.output_tokens,
             "total_haiku_cost_usd": round(total_haiku_cost, 6),
@@ -610,8 +640,8 @@ def main() -> None:
     extract_parser = sub.add_parser(
         "extract",
         help=(
-            "Extract structured VendorProfile from scraped markdown via Haiku "
-            "(sample_urls only for now)"
+            "Extract structured VendorProfile from scraped markdown "
+            "(rule parsers when available, else Haiku; sample_urls only for now)"
         ),
     )
     extract_parser.add_argument(

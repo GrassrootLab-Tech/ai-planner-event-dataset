@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -17,6 +18,8 @@ from vendor_profiles.db.profiles_repo import (
     EXTRACTED_STATUS,
     VendorsScrapedProfilesRepository,
 )
+from vendor_profiles.parsers import get_parser_for_url
+from vendor_profiles.parsers.base import VendorProfileParser
 
 
 def source_from_page_url(page_url: str) -> str:
@@ -33,6 +36,7 @@ class ExtractOutcome:
     detail: str = ""
     haiku_usage: TokenUsage = field(default_factory=TokenUsage)
     profile_payload: dict | None = None
+    extraction_method: str | None = None  # rules | haiku
 
     @property
     def ok(self) -> bool:
@@ -45,11 +49,15 @@ class VendorExtractService:
         *,
         profiles_repo: VendorsScrapedProfilesRepository,
         extracted_repo: VendorsExtractedProfilesRepository,
-        extract_client: AnthropicVendorExtractClient,
+        extract_client: AnthropicVendorExtractClient | None = None,
+        get_parser: Callable[
+            [str], VendorProfileParser | None
+        ] = get_parser_for_url,
     ) -> None:
         self._profiles = profiles_repo
         self._extracted = extracted_repo
         self._client = extract_client
+        self._get_parser = get_parser
 
     async def extract_url(self, page_url: str) -> ExtractOutcome:
         doc = await self._profiles.find_scraped_by_page_url(page_url)
@@ -82,25 +90,45 @@ class VendorExtractService:
                 detail="empty or missing markdown",
             )
 
-        cleaned = clean_markdown(markdown, keep_links=True)
-        if not cleaned.strip():
-            return ExtractOutcome(
-                page_url=page_url,
-                outcome="skipped",
-                detail="markdown empty after cleaning",
-            )
-        logger.info(
-            "Cleaned markdown for extract page_url=%s raw_chars=%d cleaned_chars=%d",
-            page_url,
-            len(markdown),
-            len(cleaned),
-        )
-
+        parser = self._get_parser(page_url)
         try:
-            profile, usage = await self._client.extract_profile(
-                page_url=page_url,
-                markdown=cleaned,
-            )
+            if parser is not None:
+                logger.info(
+                    "Rules extract page_url=%s parser=%s raw_chars=%d",
+                    page_url,
+                    parser.source_host,
+                    len(markdown),
+                )
+                profile = parser.parse(page_url, markdown)
+                usage = TokenUsage()
+                method = "rules"
+            else:
+                if self._client is None:
+                    return ExtractOutcome(
+                        page_url=page_url,
+                        outcome="skipped",
+                        detail="no rule parser and no Haiku extract client",
+                    )
+                cleaned = clean_markdown(markdown, keep_links=True)
+                if not cleaned.strip():
+                    return ExtractOutcome(
+                        page_url=page_url,
+                        outcome="skipped",
+                        detail="markdown empty after cleaning",
+                    )
+                logger.info(
+                    "Cleaned markdown for extract page_url=%s "
+                    "raw_chars=%d cleaned_chars=%d",
+                    page_url,
+                    len(markdown),
+                    len(cleaned),
+                )
+                profile, usage = await self._client.extract_profile(
+                    page_url=page_url,
+                    markdown=cleaned,
+                )
+                method = "haiku"
+
             profile_fields = profile.model_dump(mode="json", exclude_none=True)
             source = source_from_page_url(page_url)
             await self._extracted.upsert_extracted(
@@ -120,6 +148,7 @@ class VendorExtractService:
                 outcome="extracted",
                 haiku_usage=usage,
                 profile_payload=profile_fields,
+                extraction_method=method,
             )
         except Exception as exc:
             logger.exception("extract failed for %s", page_url)

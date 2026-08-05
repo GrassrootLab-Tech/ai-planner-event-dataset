@@ -153,6 +153,7 @@ class VendorProfile(BaseModel):
     faqs: Optional[list[FAQ]] = None
     languages: Optional[list[str]] = None
     genres_or_styles: Optional[list[str]] = None
+    song_list: Optional[list[str]] = None
     years_in_business: Optional[YearsInBusiness] = None
 
     # Media
