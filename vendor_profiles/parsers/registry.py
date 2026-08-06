@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from vendor_profiles.parsers.base import VendorProfileParser
+from vendor_profiles.parsers.eventective import EventectiveProfileParser
 from vendor_profiles.parsers.gigsalad import GigSaladProfileParser
 from vendor_profiles.parsers.partyslate import PartySlateProfileParser
 from vendor_profiles.parsers.thebash import TheBashProfileParser
@@ -14,6 +15,7 @@ PARSERS: dict[str, VendorProfileParser] = {
     p.source_host: p
     for p in (
         TheBashProfileParser(),
+        EventectiveProfileParser(),
         GigSaladProfileParser(),
         PartySlateProfileParser(),
         TheKnotProfileParser(),

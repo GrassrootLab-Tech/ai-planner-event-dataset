@@ -47,22 +47,22 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.weddingwire.com/biz/good-to-go-djs-and-entertainment/4bcceeaa8d0506ca.html",
     #     "page_title": None,
     # },
-    {
-        "page_url": "https://www.thumbtack.com/co/denver/magicians/comedy-magician-children-adult-entertainment/service/146631760033621185",
-        "page_title": None,
-    },
-    {
-        "page_url": "https://www.thumbtack.com/co/erie/personal-chefs/private-chef-events/service/559762247329136668",
-        "page_title": None,
-    },
     # {
-    #     "page_url": "https://www.eventective.com/denver-co/professional-video-and-photography-photographer-558056.html",
+    #     "page_url": "https://www.thumbtack.com/co/denver/magicians/comedy-magician-children-adult-entertainment/service/146631760033621185",
     #     "page_title": None,
     # },
     # {
-    #     "page_url": "https://www.eventective.com/366899/Magician-Dewayne-Hill.html",
+    #     "page_url": "https://www.thumbtack.com/co/erie/personal-chefs/private-chef-events/service/559762247329136668",
     #     "page_title": None,
     # },
+    {
+        "page_url": "https://www.eventective.com/denver-co/professional-video-and-photography-photographer-558056.html",
+        "page_title": None,
+    },
+    {
+        "page_url": "https://www.eventective.com/366899/Magician-Dewayne-Hill.html",
+        "page_title": None,
+    },
     # {
     #     "page_url": "https://www.thebash.com/singer/obadiah-parker",
     #     "page_title": "Obadiah Parker",
@@ -91,12 +91,12 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.zola.com/wedding-vendors/wedding-bands-djs/alexa-kilgore",
     #     "page_title": "Alexa Kilgore",
     # },
-    {
-        "page_url": "https://www.thumbtack.com/co/denver/violin-lessons/melod-primavera/service/482164509296320519",
-        "page_title": "Melod Primavera",
-    },
     # {
-    #     "page_url": "https://www.eventective.com/broomfield-co/the-fever-517211.html",
-    #     "page_title": "The Fever 517211",
+    #     "page_url": "https://www.thumbtack.com/co/denver/violin-lessons/melod-primavera/service/482164509296320519",
+    #     "page_title": "Melod Primavera",
     # },
+    {
+        "page_url": "https://www.eventective.com/broomfield-co/the-fever-517211.html",
+        "page_title": "The Fever 517211",
+    },
 ]
