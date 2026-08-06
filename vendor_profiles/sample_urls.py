@@ -31,22 +31,22 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.partyslate.com/vendors/catering-by-design",
     #     "page_title": None,
     # },
-    {
-        "page_url": "https://www.zola.com/wedding-vendors/wedding-bands-djs/signature-celebrations",
-        "page_title": None,
-    },
-    {
-        "page_url": "https://www.zola.com/wedding-vendors/wedding-catering/brothers-bbq",
-        "page_title": None,
-    },
     # {
-    #     "page_url": "https://www.weddingwire.com/biz/abc-hair-and-makeup/da5802aee2d4762b.html",
+    #     "page_url": "https://www.zola.com/wedding-vendors/wedding-bands-djs/signature-celebrations",
     #     "page_title": None,
     # },
     # {
-    #     "page_url": "https://www.weddingwire.com/biz/good-to-go-djs-and-entertainment/4bcceeaa8d0506ca.html",
+    #     "page_url": "https://www.zola.com/wedding-vendors/wedding-catering/brothers-bbq",
     #     "page_title": None,
     # },
+    {
+        "page_url": "https://www.weddingwire.com/biz/abc-hair-and-makeup/da5802aee2d4762b.html",
+        "page_title": None,
+    },
+    {
+        "page_url": "https://www.weddingwire.com/biz/good-to-go-djs-and-entertainment/4bcceeaa8d0506ca.html",
+        "page_title": None,
+    },
     # {
     #     "page_url": "https://www.thumbtack.com/co/denver/magicians/comedy-magician-children-adult-entertainment/service/146631760033621185",
     #     "page_title": None,
@@ -83,14 +83,14 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.theknot.com/marketplace/raphael-batista-violinist-and-dj-denver-co-2099978",
     #     "page_title": None,
     # },
-    # {
-    #     "page_url": "https://www.weddingwire.com/biz/i-do-by-liv/b2c0979a73e963ca.html",
-    #     "page_title": "I Do By Liv",
-    # },
     {
-        "page_url": "https://www.zola.com/wedding-vendors/wedding-bands-djs/alexa-kilgore",
-        "page_title": "Alexa Kilgore",
+        "page_url": "https://www.weddingwire.com/biz/i-do-by-liv/b2c0979a73e963ca.html",
+        "page_title": "I Do By Liv",
     },
+    # {
+    #     "page_url": "https://www.zola.com/wedding-vendors/wedding-bands-djs/alexa-kilgore",
+    #     "page_title": "Alexa Kilgore",
+    # },
     # {
     #     "page_url": "https://www.thumbtack.com/co/denver/violin-lessons/melod-primavera/service/482164509296320519",
     #     "page_title": "Melod Primavera",

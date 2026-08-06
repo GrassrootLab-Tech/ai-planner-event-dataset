@@ -5,6 +5,7 @@ from vendor_profiles.parsers.gigsalad import GigSaladProfileParser
 from vendor_profiles.parsers.partyslate import PartySlateProfileParser
 from vendor_profiles.parsers.thebash import TheBashProfileParser
 from vendor_profiles.parsers.theknot import TheKnotProfileParser
+from vendor_profiles.parsers.weddingwire import WeddingWireProfileParser
 from vendor_profiles.parsers.zola import ZolaProfileParser
 from vendor_profiles.source_rules import normalize_source_host
 
@@ -16,6 +17,7 @@ PARSERS: dict[str, VendorProfileParser] = {
         PartySlateProfileParser(),
         TheKnotProfileParser(),
         ZolaProfileParser(),
+        WeddingWireProfileParser(),
     )
 }
 
