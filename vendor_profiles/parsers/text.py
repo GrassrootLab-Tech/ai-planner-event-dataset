@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import re
 from datetime import date, datetime
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 _SOFT_BREAK_RE = re.compile(r"[ \t]*\\\s*$", re.MULTILINE)
@@ -66,6 +67,28 @@ def absolute_url(url: str) -> str | None:
 def strip_media_variant(url: str) -> str:
     """Drop The Bash / XOGRP image transform suffixes (~rs_..., ~sc_..., ~cr_...)."""
     return _MEDIA_VARIANT_RE.sub("", url)
+
+
+_TRACKING_PARAMS = frozenset({"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref"})
+
+
+def strip_tracking_params(url: str) -> str:
+    """Drop utm_* / ref query params from an absolute URL."""
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    keep = {k: v for k, v in qs.items() if k.lower() not in _TRACKING_PARAMS}
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            urlencode(keep, doseq=True),
+            "",
+        )
+    ).rstrip("?")
 
 
 def parse_money(text: str) -> tuple[float, str] | None:

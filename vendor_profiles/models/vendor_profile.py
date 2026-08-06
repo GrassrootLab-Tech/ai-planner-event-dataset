@@ -48,6 +48,13 @@ class ServiceArea(BaseModel):
     can_travel_statewide: Optional[bool] = None
 
 
+class MarketServed(BaseModel):
+    """A market / metro the vendor serves."""
+
+    location: str
+    is_additional_fee_required: bool = False
+
+
 class YearsInBusiness(BaseModel):
     start_year: Optional[int] = None
     start_month: Optional[int] = None
@@ -192,6 +199,7 @@ class VendorProfile(BaseModel):
     # Location & travel
     location: Optional[Location] = None
     service_area: Optional[ServiceArea] = None
+    markets_served: Optional[list[MarketServed]] = None
     available_dates: Optional[list[date]] = None
     unavailable_dates: Optional[list[date]] = None
 
