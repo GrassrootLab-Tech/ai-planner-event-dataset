@@ -28,6 +28,7 @@ _RESIDENTIAL_PROXY_HOSTS = frozenset(
         "theknot.com",
         "weddingwire.com",
         "thumbtack.com",
+        "partyslate.com",
     }
 )
 
@@ -163,6 +164,56 @@ class HasDataClient:
             {"markdown_length": len(markdown), "link_count": len(links)},
         )
         return DirectoryScrapeResult(markdown=markdown, links=links)
+
+    async def scrape_api_json(
+        self,
+        api_url: str,
+        *,
+        proxy_type: str | None = None,
+    ) -> dict:
+        """Scrape an API URL; return raw HasData JSON body (html + text)."""
+        proxy = proxy_type or proxy_type_for_url(api_url)
+        payload = {
+            "url": api_url,
+            "outputFormat": ["html", "text"],
+            "proxyType": proxy,
+            "proxyCountry": "US",
+            "jsRendering": True,
+            "blockAds": True,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self._api_key,
+        }
+
+        log_pretty("Calling HasData API JSON scrape", {
+            "url": self.BASE_URL,
+            "payload": payload,
+        })
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(self.BASE_URL, json=payload, headers=headers)
+
+        logger.info("HasData API JSON scrape status=%s", response.status_code)
+
+        if response.status_code != 200:
+            raise ScrapeError(
+                f"HasData request failed with status {response.status_code}: {response.text}"
+            )
+
+        data = response.json()
+        metadata = data.get("requestMetadata", {})
+        if metadata.get("status") != "ok":
+            raise ScrapeError(f"HasData scrape failed: {metadata}")
+
+        log_pretty(
+            "HasData API JSON scrape result",
+            {
+                "has_text": bool(data.get("text")),
+                "content_length": len(data.get("content") or ""),
+            },
+        )
+        return data
 
     @staticmethod
     def _normalize_links(raw: object) -> list[str]:

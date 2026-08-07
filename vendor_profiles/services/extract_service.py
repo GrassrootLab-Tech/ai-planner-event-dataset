@@ -20,6 +20,7 @@ from vendor_profiles.db.profiles_repo import (
 )
 from vendor_profiles.parsers import get_parser_for_url
 from vendor_profiles.parsers.base import VendorProfileParser
+from vendor_profiles.partyslate_listing_api import is_partyslate_venue_profile
 
 
 def source_from_page_url(page_url: str) -> str:
@@ -60,6 +61,13 @@ class VendorExtractService:
         self._get_parser = get_parser
 
     async def extract_url(self, page_url: str) -> ExtractOutcome:
+        if is_partyslate_venue_profile(page_url):
+            return ExtractOutcome(
+                page_url=page_url,
+                outcome="skipped",
+                detail="partyslate venue extract not supported yet",
+            )
+
         doc = await self._profiles.find_scraped_by_page_url(page_url)
         if doc is None:
             return ExtractOutcome(

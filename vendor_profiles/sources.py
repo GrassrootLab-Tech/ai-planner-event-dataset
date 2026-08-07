@@ -11,6 +11,13 @@ SOURCES: list[str] = [
     "https://www.eventective.com",
 ]
 
+# Hosts paused from stage + profile scrape. Parsers/rules stay registered — empty to re-enable.
+DISABLED_STAGE_SCRAPE_HOSTS: frozenset[str] = frozenset(
+    {
+        "thumbtack.com",
+    }
+)
+
 CITIES: list[dict[str, str]] = [
     {"name": "Denver", "slug": "denver-co"},
     {"name": "Colorado Springs", "slug": "colorado-springs-co"},

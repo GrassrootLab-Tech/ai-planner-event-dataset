@@ -3,12 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from clients.hasdata_client import HasDataClient
+from clients.hasdata_client import HasDataClient, ScrapeError
 from utils.pipeline_cost import TokenUsage
 from utils.url import clean_page_url
 from vendor_profiles.clients.anthropic_vendor_link_client import AnthropicVendorLinkClient
 from vendor_profiles.db.directory_urls_repo import VendorsScrapedDirectoryUrlsRepository
 from vendor_profiles.db.profiles_repo import VendorsScrapedProfilesRepository
+from vendor_profiles.partyslate_listing_api import (
+    convert_partyslate_url,
+    extract_json_payload,
+    is_partyslate_host,
+    listing_profile_urls,
+    profile_kind,
+)
 from vendor_profiles.services.scrape_service import (
     EMPTY_MARKDOWN_ERROR,
     is_empty_markdown,
@@ -19,7 +26,9 @@ from vendor_profiles.source_rules import (
     classify_url,
     extract_vendor_profile_urls,
     get_rules_for_url,
+    normalize_source_host,
 )
+from vendor_profiles.sources import DISABLED_STAGE_SCRAPE_HOSTS
 
 VENDOR_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 VENDOR_STAGE_REPORT_PATH = VENDOR_OUTPUT_DIR / "vendor_stage_report.txt"
@@ -64,6 +73,14 @@ class VendorStageService:
         if not cleaned:
             return StageResult(page_url=page_url, outcome="error", detail="empty url")
 
+        host = normalize_source_host(cleaned)
+        if host in DISABLED_STAGE_SCRAPE_HOSTS:
+            return StageResult(
+                page_url=cleaned,
+                outcome="skipped_disabled",
+                detail=f"source {host} temporarily disabled for stage/scrape",
+            )
+
         if await self._profiles.exists_as_page_or_parent(cleaned):
             return StageResult(
                 page_url=cleaned,
@@ -107,6 +124,9 @@ class VendorStageService:
                 outcome="single_vendor",
                 profiles_inserted=1 if inserted else 0,
             )
+
+        if is_partyslate_host(cleaned):
+            return await self._stage_partyslate_directory(cleaned)
 
         scrape = await self._hasdata.scrape_directory(cleaned)
         if is_empty_markdown(scrape.markdown):
@@ -156,6 +176,97 @@ class VendorStageService:
             detail=f"links={len(scrape.links)} profiles={len(cleaned_profiles)}",
             profiles_inserted=len(inserted_urls),
             haiku_usage=usage,
+        )
+
+    async def _stage_partyslate_directory(self, cleaned: str) -> StageResult:
+        try:
+            api_url = convert_partyslate_url(cleaned)
+        except ValueError as exc:
+            await self._directories.upsert_scrape(
+                page_url=cleaned,
+                markdown="",
+                all_links=[],
+                html="",
+                status="failed",
+                error=str(exc),
+            )
+            return StageResult(
+                page_url=cleaned,
+                outcome="error",
+                detail=str(exc),
+            )
+
+        try:
+            body = await self._hasdata.scrape_api_json(api_url)
+        except ScrapeError as exc:
+            await self._directories.upsert_scrape(
+                page_url=cleaned,
+                markdown="",
+                all_links=[],
+                html="",
+                status="failed",
+                error=str(exc),
+            )
+            return StageResult(
+                page_url=cleaned,
+                outcome="error",
+                detail=str(exc),
+            )
+
+        payload = extract_json_payload(body)
+        html = ""
+        content = body.get("content")
+        if isinstance(content, str) and content:
+            html = content
+        elif isinstance(body.get("html"), str):
+            html = body["html"]
+
+        if payload is None:
+            await self._directories.upsert_scrape(
+                page_url=cleaned,
+                markdown="",
+                all_links=[],
+                html=html,
+                status="failed",
+                error="failed to parse PartySlate listing JSON",
+            )
+            return StageResult(
+                page_url=cleaned,
+                outcome="error",
+                detail="failed to parse PartySlate listing JSON",
+            )
+
+        kind = profile_kind(api_url)
+        cleaned_profiles = listing_profile_urls(payload, kind)
+
+        await self._directories.upsert_scrape(
+            page_url=cleaned,
+            markdown="",
+            all_links=[],
+            html=html,
+            status="ok",
+        )
+        await self._directories.set_vendor_profile_urls(cleaned, cleaned_profiles)
+
+        inserted_urls: list[str] = []
+        for profile in cleaned_profiles:
+            ok = await self._profiles.insert_pending(
+                profile, parent_page_url=cleaned
+            )
+            if ok:
+                inserted_urls.append(profile)
+
+        if inserted_urls:
+            await self._profiles.set_status_many(inserted_urls, "staged")
+
+        return StageResult(
+            page_url=cleaned,
+            outcome="vendors_directory",
+            detail=(
+                f"partyslate_api profiles={len(cleaned_profiles)} "
+                f"kind={kind}"
+            ),
+            profiles_inserted=len(inserted_urls),
         )
 
     def _append_report(self, line: str) -> None:

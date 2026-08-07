@@ -90,9 +90,11 @@ _GIGSALAD_NON_VENDOR_ALT = "|".join(
 PATTERNS = {
     "thebash.com": {
         # /blues-band/ellie-d-soul-mix — exclude nav/listing first segments
+        # and city-state browse pages like /wedding-entertainment/denver-co
         "profile": re.compile(
             rf"^/(?!(?:{_THEBASH_NON_VENDOR_FIRST_ALT})/)"
-            r"[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*/?$"
+            r"[a-z0-9]+(?:-[a-z0-9]+)*/"
+            r"[a-z0-9]+(?:-[a-z0-9]+)*(?<!-[a-z]{2})/?$"
         ),
         # /search/acrobat-denver-co
         "directory": re.compile(r"^/search/[a-z0-9]+(?:-[a-z0-9]+)*/?$"),
@@ -118,8 +120,10 @@ PATTERNS = {
     ),
 },
     "partyslate.com": {
-        # /vendors/good-musicians
-        "profile": re.compile(r"^/vendors/[a-z0-9]+(?:-[a-z0-9]+)+/?$"),
+        # /vendors/good-musicians, /venues/denver-art-museum
+        "profile": re.compile(
+            r"^/(?:vendors|venues)/[a-z0-9]+(?:-[a-z0-9]+)+/?$"
+        ),
         # /find-vendors/event-entertainment/area/denver, /find-venues/corporate-event-venues/near/denver-co-usa/types/museum
         "directory": re.compile(
             r"^/find-(?:vendors|venues)/[a-z0-9-]+(?:/[a-z0-9-]+)*/?$"
@@ -141,9 +145,8 @@ PATTERNS = {
     },
     "weddingwire.com": {
         # /biz/great-family-artists/8badbbfd76385de2.html
-        # /reviews/great-family-artists/8badbbfd76385de2.html
         "profile": re.compile(
-            r"^/(?:biz|reviews)/[a-z0-9]+(?:-[a-z0-9]+)+/[0-9a-f]+\.html$"
+            r"^/biz/[a-z0-9]+(?:-[a-z0-9]+)+/[0-9a-f]+\.html$"
         ),
         # /c/co-colorado/.../wedding-ceremony-music/751-4-rca.html
         # /c/co-colorado/denver/wedding-ceremony-music/4-vendors.html

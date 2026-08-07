@@ -10,6 +10,8 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from utils.url import clean_page_url
+from vendor_profiles.source_rules import normalize_source_host
+from vendor_profiles.sources import DISABLED_STAGE_SCRAPE_HOSTS
 
 PROCESSED_STATUS = "processed"
 
@@ -28,6 +30,13 @@ class StagePage:
     category_slug: str = ""
     city_slug: str = ""
     refs: list[SerpResultRef] = field(default_factory=list)
+
+
+def _is_stage_enabled(page: StagePage) -> bool:
+    host = normalize_source_host(page.page_url) or normalize_source_host(
+        page.source_url
+    )
+    return host not in DISABLED_STAGE_SCRAPE_HOSTS
 
 
 def _round_robin_cat_city(pages: list[StagePage]) -> deque[StagePage]:
@@ -150,6 +159,7 @@ class VendorsSerpResultsRepository:
             raise ValueError("batch_size must be >= 1")
 
         candidates = await self._collect_unprocessed()
+        candidates = [c for c in candidates if _is_stage_enabled(c)]
         return _select_even_batch(candidates, batch_size)
 
     async def pick_random_unprocessed_by_domain(
@@ -170,6 +180,7 @@ class VendorsSerpResultsRepository:
                 }
             }
         )
+        candidates = [c for c in candidates if _is_stage_enabled(c)]
         if len(candidates) <= batch_size:
             return candidates
         return random.sample(candidates, batch_size)

@@ -7,10 +7,25 @@ from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 
 from utils.logger import logger
+from vendor_profiles.sources import DISABLED_STAGE_SCRAPE_HOSTS
 
 SCRAPE_ELIGIBLE_STATUSES = ("staged", "failed")
 EXTRACT_ELIGIBLE_STATUS = "scraped"
 EXTRACTED_STATUS = "extracted"
+
+
+def _scrape_host_exclusion_query() -> dict | None:
+    if not DISABLED_STAGE_SCRAPE_HOSTS:
+        return None
+    # page_url contains host (e.g. thumbtack.com); keep FIFO for other sources.
+    alt = "|".join(
+        sorted(
+            (h.replace(".", r"\.") for h in DISABLED_STAGE_SCRAPE_HOSTS),
+            key=len,
+            reverse=True,
+        )
+    )
+    return {"page_url": {"$not": {"$regex": alt, "$options": "i"}}}
 
 
 class VendorsScrapedProfilesRepository:
@@ -77,9 +92,13 @@ class VendorsScrapedProfilesRepository:
     async def list_scrape_candidates(self, limit: int) -> list[dict]:
         if limit < 1:
             raise ValueError("limit must be >= 1")
+        query: dict = {"status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)}}
+        exclusion = _scrape_host_exclusion_query()
+        if exclusion:
+            query.update(exclusion)
         cursor = (
             self._collection.find(
-                {"status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)}},
+                query,
                 {"page_url": 1},
             )
             .sort("_id", ASCENDING)

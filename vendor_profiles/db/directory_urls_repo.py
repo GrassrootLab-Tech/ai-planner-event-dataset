@@ -34,6 +34,7 @@ class VendorsScrapedDirectoryUrlsRepository:
         all_links: list[str],
         status: str = "ok",
         error: str | None = None,
+        html: str | None = None,
     ) -> None:
         await self.ensure_indexes()
         now = datetime.now(timezone.utc)
@@ -45,6 +46,8 @@ class VendorsScrapedDirectoryUrlsRepository:
             "markdown": markdown,
             "status": status,
         }
+        if html is not None:
+            fields["html"] = html
         update: dict
         if status == "failed":
             fields["error"] = error or "scrape failed"
