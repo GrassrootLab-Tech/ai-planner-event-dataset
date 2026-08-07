@@ -172,10 +172,13 @@ async def run_stage(
     concurrency: int = 3,
     run_sample: bool = False,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    domain: str | None = None,
 ) -> list[StageResult]:
     set_log_stage("vendor_stage")
     if concurrency < 1:
         raise ValueError("--concurrency must be >= 1")
+    if run_sample and domain:
+        raise ValueError("--domain cannot be used with --run-sample")
     if not run_sample and batch_size < 1:
         raise ValueError("--batch-size must be >= 1")
 
@@ -211,6 +214,26 @@ async def run_stage(
             logger.info(
                 "Vendor stage (sample): %d URLs (concurrency=%d)",
                 len(pages),
+                concurrency,
+            )
+        elif domain:
+            pages = await serp_repo.pick_random_unprocessed_by_domain(
+                domain, batch_size
+            )
+            if not pages:
+                logger.warning(
+                    "No unprocessed SERP URLs for domain %r — nothing to stage",
+                    domain,
+                )
+                print(
+                    f"No unprocessed SERP URLs for domain {domain!r} — nothing to stage"
+                )
+                return []
+            logger.info(
+                "Vendor stage (domain=%s random): %d URLs batch_size=%d concurrency=%d",
+                domain,
+                len(pages),
+                batch_size,
                 concurrency,
             )
         else:
@@ -634,6 +657,15 @@ def main() -> None:
         help="Stage URLs from vendor_profiles/sample_urls.py instead of SERP",
     )
     stage_parser.add_argument(
+        "--domain",
+        type=str,
+        default=None,
+        help=(
+            "Sample random unprocessed SERP URLs whose source_url contains this "
+            "keyword (e.g. partyslate); for testing — skips even-mix selection"
+        ),
+    )
+    stage_parser.add_argument(
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
@@ -726,6 +758,7 @@ def main() -> None:
                     concurrency=args.concurrency,
                     run_sample=args.run_sample,
                     batch_size=args.batch_size,
+                    domain=args.domain,
                 )
             )
             if sum(1 for r in results if r.outcome == "error"):

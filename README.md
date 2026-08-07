@@ -67,6 +67,10 @@ python -m vendor_profiles poll-serp
 python -m vendor_profiles stage
 python -m vendor_profiles stage --batch-size 100 --concurrency 3
 
+# Stage a random sample from one source (keyword match on source_url; for testing)
+python -m vendor_profiles stage --domain partyslate
+python -m vendor_profiles stage --domain thebash --batch-size 50
+
 # Stage from vendor_profiles/sample_urls.py instead
 python -m vendor_profiles stage --run-sample
 python -m vendor_profiles stage --run-sample --concurrency 3
@@ -84,7 +88,7 @@ python -m vendor_profiles extract --run-sample
 python -m vendor_profiles extract --run-sample --concurrency 3
 ```
 
-Default stage pulls from `vendor_data_serp_results` (`status: ok`), picks URLs whose `results[].status` is missing or not `processed`, stages them, then sets `results[].status` to `processed`. Sample mode uses [`vendor_profiles/sample_urls.py`](vendor_profiles/sample_urls.py) and does not update SERP statuses. Scrape picks FIFO `vendors_scraped_profiles` with `status` in `staged|failed`; success writes `html`/`markdown`/`scraped_at` and `status: scraped`, failures set `status: failed`. Extract picks FIFO `vendors_scraped_profiles` with `status: scraped` (or sample URLs with `--run-sample`), uses a rule parser when registered else Haiku over cleaned `markdown`, upserts into `vendors_extracted_profiles` (`page_url`, `extracted_at`, `source`, plus non-null profile fields), sets profile `status: extracted`, and skips URLs already `extracted`. Writes `vendor_profiles/output/{timestamp}_extracted_cost.txt` (per-URL tokens/cost + totals). Sources/cities/categories: `vendor_profiles/sources.py`. Regex rules: `vendor_profiles/source_rules.py`. After each stage run: `vendor_profiles/output/{timestamp}_{N}_urls_run.txt` (per-URL success/failed + Haiku cost, plus totals). Skip notes: `vendor_profiles/output/vendor_stage_report.txt`.
+Default stage pulls from `vendor_data_serp_results` (`status: ok`), picks URLs whose `results[].status` is missing or not `processed`, stages them, then sets `results[].status` to `processed`. With `--domain <keyword>` (e.g. `partyslate`), it instead takes a random unprocessed batch whose `source_url` contains that keyword. Sample mode uses [`vendor_profiles/sample_urls.py`](vendor_profiles/sample_urls.py) and does not update SERP statuses. Scrape picks FIFO `vendors_scraped_profiles` with `status` in `staged|failed`; success writes `html`/`markdown`/`scraped_at` and `status: scraped`, failures set `status: failed`. Extract picks FIFO `vendors_scraped_profiles` with `status: scraped` (or sample URLs with `--run-sample`), uses a rule parser when registered else Haiku over cleaned `markdown`, upserts into `vendors_extracted_profiles` (`page_url`, `extracted_at`, `source`, plus non-null profile fields), sets profile `status: extracted`, and skips URLs already `extracted`. Writes `vendor_profiles/output/{timestamp}_extracted_cost.txt` (per-URL tokens/cost + totals). Sources/cities/categories: `vendor_profiles/sources.py`. Regex rules: `vendor_profiles/source_rules.py`. After each stage run: `vendor_profiles/output/{timestamp}_{N}_urls_run.txt` (per-URL success/failed + Haiku cost, plus totals). Skip notes: `vendor_profiles/output/vendor_stage_report.txt`.
 
 Env (same `.env`): `HASDATA_API_KEY`, `DATAFORSEO_*`, `ANTHROPIC_API_KEY`, `MONGO_*`, `VENDOR_DATA_SERP_RESULTS_COLLECTION`, `VENDORS_SCRAPED_*`, `VENDORS_EXTRACTED_PROFILES_COLLECTION`.
 

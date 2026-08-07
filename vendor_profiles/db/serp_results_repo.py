@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
@@ -75,12 +77,18 @@ class VendorsSerpResultsRepository:
     def __init__(self, collection: AsyncIOMotorCollection) -> None:
         self._collection = collection
 
-    async def pick_unprocessed_batch(self, batch_size: int) -> list[StagePage]:
-        if batch_size < 1:
-            raise ValueError("batch_size must be >= 1")
+    async def _collect_unprocessed(
+        self, *, query: dict[str, Any] | None = None
+    ) -> list[StagePage]:
+        filter_query: dict[str, Any] = {
+            "status": "ok",
+            "results.0": {"$exists": True},
+        }
+        if query:
+            filter_query.update(query)
 
         cursor = self._collection.find(
-            {"status": "ok", "results.0": {"$exists": True}},
+            filter_query,
             {
                 "results": 1,
                 "source_url": 1,
@@ -135,7 +143,36 @@ class VendorsSerpResultsRepository:
                     refs=[ref],
                 )
 
-        return _select_even_batch(list(by_url.values()), batch_size)
+        return list(by_url.values())
+
+    async def pick_unprocessed_batch(self, batch_size: int) -> list[StagePage]:
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+
+        candidates = await self._collect_unprocessed()
+        return _select_even_batch(candidates, batch_size)
+
+    async def pick_random_unprocessed_by_domain(
+        self, domain: str, batch_size: int
+    ) -> list[StagePage]:
+        """Random sample of unprocessed URLs whose source_url contains domain."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        keyword = domain.strip()
+        if not keyword:
+            raise ValueError("domain must be a non-empty keyword")
+
+        candidates = await self._collect_unprocessed(
+            query={
+                "source_url": {
+                    "$regex": re.escape(keyword),
+                    "$options": "i",
+                }
+            }
+        )
+        if len(candidates) <= batch_size:
+            return candidates
+        return random.sample(candidates, batch_size)
 
     async def mark_results_processed(self, refs: list[SerpResultRef]) -> None:
         for ref in refs:
