@@ -28,7 +28,6 @@ _RESIDENTIAL_PROXY_HOSTS = frozenset(
         "theknot.com",
         "weddingwire.com",
         "thumbtack.com",
-        "partyslate.com",
     }
 )
 
