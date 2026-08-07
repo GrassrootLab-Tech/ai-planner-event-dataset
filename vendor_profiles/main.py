@@ -3,6 +3,7 @@
   python -m vendor_profiles stage [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles stage --run-sample [--concurrency 3]
   python -m vendor_profiles scrape [--batch-size 100] [--concurrency 3]
+  python -m vendor_profiles extract [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles extract --run-sample [--concurrency 3]
   python -m vendor_profiles fetch-serp [--workers 4]
   python -m vendor_profiles poll-serp [--workers 4]
@@ -457,21 +458,22 @@ def _write_extract_cost_report(
     return path
 
 
-async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
+async def run_extract(
+    *,
+    concurrency: int = 3,
+    run_sample: bool = False,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> list[ExtractOutcome]:
     set_log_stage("vendor_extract")
     if concurrency < 1:
         raise ValueError("--concurrency must be >= 1")
+    if not run_sample and batch_size < 1:
+        raise ValueError("--batch-size must be >= 1")
 
     settings = VendorSettings()
     _log_settings(settings)
 
     started_at = datetime.now(timezone.utc)
-    pages = normalize_pages(
-        PAGE_URLS, source="vendor_profiles.sample_urls.PAGE_URLS"
-    )
-    if not pages:
-        logger.warning("sample_urls.PAGE_URLS is empty — nothing to extract")
-        return []
 
     extract_client: AnthropicVendorExtractClient | None = None
     if settings.anthropic_api_key:
@@ -497,13 +499,40 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
         await profiles_repo.ensure_indexes()
         await extracted_repo.ensure_indexes()
 
-        total = len(pages)
-        logger.info(
-            "Vendor extract (sample): %d URLs concurrency=%d",
-            total,
-            concurrency,
-        )
+        if run_sample:
+            pages = normalize_pages(
+                PAGE_URLS, source="vendor_profiles.sample_urls.PAGE_URLS"
+            )
+            if not pages:
+                logger.warning(
+                    "sample_urls.PAGE_URLS is empty — nothing to extract"
+                )
+                return []
+            logger.info(
+                "Vendor extract (sample): %d URLs concurrency=%d",
+                len(pages),
+                concurrency,
+            )
+        else:
+            candidates = await profiles_repo.list_extract_candidates(batch_size)
+            if not candidates:
+                logger.warning(
+                    "No scraped profiles to extract — nothing to do"
+                )
+                print("No scraped profiles to extract — nothing to do")
+                return []
+            pages = [
+                StagePage(page_url=c["page_url"], page_title=None)
+                for c in candidates
+            ]
+            logger.info(
+                "Vendor extract (db): %d URLs batch_size=%d concurrency=%d",
+                len(pages),
+                batch_size,
+                concurrency,
+            )
 
+        total = len(pages)
         service = VendorExtractService(
             profiles_repo=profiles_repo,
             extracted_repo=extracted_repo,
@@ -566,7 +595,7 @@ async def run_extract_sample(*, concurrency: int = 3) -> list[ExtractOutcome]:
             settings.anthropic_link_filter_model, total_usage
         )
         summary = {
-            "mode": "sample",
+            "mode": "sample" if run_sample else "db",
             "url_count": len(results),
             "extracted_via_rules": rules_count,
             "extracted_via_haiku": haiku_count,
@@ -641,14 +670,23 @@ def main() -> None:
         "extract",
         help=(
             "Extract structured VendorProfile from scraped markdown "
-            "(rule parsers when available, else Haiku; sample_urls only for now)"
+            "(DB batch by default, or sample_urls with --run-sample; "
+            "rule parsers when available, else Haiku)"
         ),
     )
     extract_parser.add_argument(
         "--run-sample",
         action="store_true",
-        required=True,
-        help="Extract URLs from vendor_profiles/sample_urls.py (required)",
+        help="Extract URLs from vendor_profiles/sample_urls.py instead of DB",
+    )
+    extract_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help=(
+            "Max scraped profiles to extract in one run "
+            f"(default: {DEFAULT_BATCH_SIZE}; ignored with --run-sample)"
+        ),
     )
     extract_parser.add_argument(
         "--concurrency",
@@ -705,7 +743,11 @@ def main() -> None:
         elif args.command == "extract":
             set_log_stage("vendor_extract")
             results = asyncio.run(
-                run_extract_sample(concurrency=args.concurrency)
+                run_extract(
+                    concurrency=args.concurrency,
+                    run_sample=args.run_sample,
+                    batch_size=args.batch_size,
+                )
             )
             if sum(1 for r in results if not r.ok):
                 sys.exit(1)

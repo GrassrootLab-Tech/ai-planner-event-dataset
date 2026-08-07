@@ -92,6 +92,24 @@ class VendorsScrapedProfilesRepository:
                 docs.append({"page_url": page_url})
         return docs
 
+    async def list_extract_candidates(self, limit: int) -> list[dict]:
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        cursor = (
+            self._collection.find(
+                {"status": EXTRACT_ELIGIBLE_STATUS},
+                {"page_url": 1},
+            )
+            .sort("_id", ASCENDING)
+            .limit(limit)
+        )
+        docs: list[dict] = []
+        async for doc in cursor:
+            page_url = doc.get("page_url")
+            if isinstance(page_url, str) and page_url.strip():
+                docs.append({"page_url": page_url})
+        return docs
+
     async def save_scrape(
         self,
         page_url: str,
