@@ -23,6 +23,7 @@ booking notes.
 - team: list of {name?, role?, bio?} when personnel/team members are listed.
 - available_in: list of market/city names when the page lists service markets.
 - press_and_recognition: list of {title?, publisher?, url?} for press or awards.
+- unclaimed: true when the page shows an Unclaimed badge on the profile.
 - years_in_business: {start_year, start_month} when known.
 - gig_length: {min_minutes, max_minutes} when the page lists a gig length range.
 - unions: list of union memberships when listed.

@@ -55,14 +55,14 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.thumbtack.com/co/erie/personal-chefs/private-chef-events/service/559762247329136668",
     #     "page_title": None,
     # },
-    {
-        "page_url": "https://www.eventective.com/denver-co/professional-video-and-photography-photographer-558056.html",
-        "page_title": None,
-    },
-    {
-        "page_url": "https://www.eventective.com/366899/Magician-Dewayne-Hill.html",
-        "page_title": None,
-    },
+    # {
+    #     "page_url": "https://www.eventective.com/denver-co/professional-video-and-photography-photographer-558056.html",
+    #     "page_title": None,
+    # },
+    # {
+    #     "page_url": "https://www.eventective.com/366899/Magician-Dewayne-Hill.html",
+    #     "page_title": None,
+    # },
     # {
     #     "page_url": "https://www.thebash.com/singer/obadiah-parker",
     #     "page_title": "Obadiah Parker",
@@ -95,8 +95,20 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.thumbtack.com/co/denver/violin-lessons/melod-primavera/service/482164509296320519",
     #     "page_title": "Melod Primavera",
     # },
+    # {
+    #     "page_url": "https://www.eventective.com/broomfield-co/the-fever-517211.html",
+    #     "page_title": "The Fever 517211",
+    # },
     {
-        "page_url": "https://www.eventective.com/broomfield-co/the-fever-517211.html",
-        "page_title": "The Fever 517211",
+        "page_url": "https://www.partyslate.com/venues/international-country-club",
+        "page_title": "International Country Club | Fairfax Venue | PartySlate",
+    },
+    {
+        "page_url": "https://www.partyslate.com/venues/weddings-in-waterford",
+        "page_title": "Weddings In Waterford | Waterford Venue | PartySlate",
+    },
+    {
+        "page_url": "https://www.partyslate.com/venues/48-fields",
+        "page_title": "48 Fields | Leesburg Venue | PartySlate",
     },
 ]

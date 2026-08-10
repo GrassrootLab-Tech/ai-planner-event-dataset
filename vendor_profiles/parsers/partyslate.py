@@ -31,6 +31,7 @@ from vendor_profiles.parsers.text import (
     unescape,
 )
 from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME
+from vendor_profiles.partyslate_listing_api import is_partyslate_venue_profile
 
 _SENTINELS = frozenset(
     {
@@ -45,6 +46,7 @@ _SENTINELS = frozenset(
         "overviewgallery",
         "testimonials",
         "vendor connections",
+        "unclaimed",
     }
 )
 
@@ -98,7 +100,28 @@ _HTML_PRICE_RE = re.compile(
     r'\\"notes\\":\\"(?P<notes>.*?)\\"',
 )
 _FOOTER_START = "Get the latest trends"
-_BREADCRUMB_START = "1. [Find Vendors](/find-vendors)"
+_BREADCRUMB_STARTS = (
+    "1. [Find Venues](/find-venues)",
+    "1. [Find Vendors](/find-vendors)",
+)
+_STREET_ADDRESS_RE = re.compile(
+    r"^(?P<raw>.+,\s*(?P<city>[A-Za-z .'-]+),\s*(?P<st>[A-Z]{2})"
+    r"\s+(?P<zip>\d{5}(?:-\d{4})?),\s*(?P<country>[A-Za-z.]+))\s*$",
+    re.MULTILINE,
+)
+_CAPACITY_RE = re.compile(
+    r"^Max\s+(?P<kind>Standing|Seated)\s*\n+\s*(?P<n>\d+)\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_EVENT_SPACE_LINK_RE = re.compile(
+    r"\[(?P<body>.*?)]\((?P<url>/event-spaces/\d+|https?://[^)\s]*/event-spaces/\d+)\)",
+    re.DOTALL,
+)
+_OUTSIDE_POLICY_RE = re.compile(
+    r"^Outside\s+(?:caterers|suppliers)\s+allowed\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_UNCLAIMED_RE = re.compile(r"^Unclaimed\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 class PartySlateProfileParser(VendorProfileParser):
@@ -111,6 +134,9 @@ class PartySlateProfileParser(VendorProfileParser):
         *,
         html: str | None = None,
     ) -> VendorProfile:
+        if is_partyslate_venue_profile(page_url):
+            return self._parse_venue(page_url, markdown, html=html)
+
         body = self._profile_body(markdown)
         contact = self._parse_html_contact(html)
         business_name = self._parse_business_name(body) or contact.get("name")
@@ -133,6 +159,7 @@ class PartySlateProfileParser(VendorProfileParser):
             slug=self._slug_from_url(page_url),
             phone_number=contact.get("phone_number"),
             website=contact.get("website"),
+            unclaimed=self._parse_unclaimed(body),
             categories=categories,
             services_provided=services,
             description=about_text,
@@ -143,6 +170,63 @@ class PartySlateProfileParser(VendorProfileParser):
             response_time=self._parse_response_time(body),
             faqs=self._parse_faqs(body),
             packages=pricing.get("packages"),
+            prices=pricing.get("prices"),
+            price_range=pricing.get("price_range"),
+            past_events=self._parse_albums(body),
+            portfolio_files=portfolio,
+            profile_picture=profile_picture,
+            team=team,
+            logistic_details=logistic_details,
+            press_and_recognition=self._parse_press(body),
+            social_media=self._parse_social(body),
+        )
+
+    def _parse_venue(
+        self,
+        page_url: str,
+        markdown: str,
+        *,
+        html: str | None = None,
+    ) -> VendorProfile:
+        body = self._profile_body(markdown)
+        contact = self._parse_html_contact(html)
+        business_name = self._parse_business_name(body) or contact.get("name")
+        if not business_name:
+            raise ValueError("business_name is required")
+
+        location, service_area = self._parse_venue_location(body)
+        about_text, years = self._parse_about(body)
+        event_packages, style_tag = self._parse_event_spaces(body)
+        pricing = self._parse_pricing(body, html=html, business_name=business_name)
+        packages = list(event_packages or [])
+        if pricing.get("packages"):
+            packages.extend(pricing["packages"])
+        team, team_size = self._parse_team(body)
+        portfolio, profile_picture = self._parse_media(body)
+        logistic_details = (
+            LogisticDetails(team_size=team_size) if team_size is not None else None
+        )
+        sub = style_tag or "Venue"
+        categories = [Category(primary_category="Venue", sub_category=sub)]
+
+        return VendorProfile(
+            business_name=business_name,
+            slug=self._slug_from_url(page_url),
+            phone_number=contact.get("phone_number"),
+            website=contact.get("website"),
+            unclaimed=self._parse_unclaimed(body),
+            business_type="Venue",
+            categories=categories,
+            services_provided=self._parse_amenities(body),
+            description=about_text,
+            years_in_business=years,
+            location=location,
+            service_area=service_area,
+            booking_notes=self._parse_venue_booking_notes(body),
+            has_event_space=bool(event_packages),
+            response_time=self._parse_response_time(body),
+            faqs=self._parse_faqs(body),
+            packages=self._none_if_empty(packages),
             prices=pricing.get("prices"),
             price_range=pricing.get("price_range"),
             past_events=self._parse_albums(body),
@@ -212,7 +296,12 @@ class PartySlateProfileParser(VendorProfileParser):
 
     @staticmethod
     def _profile_body(markdown: str) -> str:
-        start = markdown.find(_BREADCRUMB_START)
+        start = -1
+        for sentinel in _BREADCRUMB_STARTS:
+            idx = markdown.find(sentinel)
+            if idx >= 0:
+                start = idx
+                break
         if start < 0:
             cover = re.search(r"!\[Cover photo", markdown)
             start = cover.start() if cover else 0
@@ -246,6 +335,13 @@ class PartySlateProfileParser(VendorProfileParser):
         if not match:
             return None
         return clean_or_none(match.group("name"))
+
+    @staticmethod
+    def _parse_unclaimed(body: str) -> bool | None:
+        # Bare "Unclaimed" badge line above the H1 (vendors + venues)
+        if _UNCLAIMED_RE.search(body):
+            return True
+        return None
 
     def _parse_categories(
         self, body: str, services: list[str] | None
@@ -295,6 +391,125 @@ class PartySlateProfileParser(VendorProfileParser):
             state_code=state_code,
         )
         return location, service_area
+
+    def _parse_venue_location(
+        self, body: str
+    ) -> tuple[Location | None, ServiceArea | None]:
+        match = _STREET_ADDRESS_RE.search(body)
+        if not match:
+            return None, None
+        city = clean_or_none(match.group("city"))
+        state_code = match.group("st")
+        zip_code = clean_or_none(match.group("zip"))
+        country_raw = clean_or_none(match.group("country"))
+        country = (
+            "US"
+            if country_raw and country_raw.upper() in {"USA", "US"}
+            else country_raw
+        )
+        state_name = STATE_CODE_TO_NAME.get(state_code)
+        raw_location = clean_or_none(match.group("raw"))
+        location = Location(
+            city=city,
+            state=state_name,
+            country=country,
+            raw_location=raw_location,
+        )
+        service_area = ServiceArea(
+            city=city,
+            state=state_name,
+            state_code=state_code,
+            service_pincode=zip_code,
+        )
+        return location, service_area
+
+    def _parse_amenities(self, body: str) -> list[str] | None:
+        raw = section(body, "Amenities", level=2)
+        if not raw:
+            return None
+        amenities: list[str] = []
+        for match in _BULLET_RE.finditer(raw):
+            item = clean_or_none(match.group("body"))
+            if item and item.lower() not in _SENTINELS:
+                amenities.append(item)
+        return self._none_if_empty(amenities)
+
+    def _parse_venue_booking_notes(self, body: str) -> list[str] | None:
+        notes: list[str] = []
+        for match in _CAPACITY_RE.finditer(body):
+            kind = match.group("kind").capitalize()
+            notes.append(f"Max {kind}: {match.group('n')}")
+        for match in _OUTSIDE_POLICY_RE.finditer(body):
+            text = clean_or_none(match.group(0))
+            if text and text not in notes:
+                notes.append(text)
+        return self._none_if_empty(notes)
+
+    def _parse_event_spaces(
+        self, body: str
+    ) -> tuple[list[Package] | None, str | None]:
+        match = re.search(
+            r"^##\s+Event Spaces(?:\s+\d+)?\s*$",
+            body,
+            re.MULTILINE | re.IGNORECASE,
+        )
+        if not match:
+            return None, None
+        start = match.end()
+        next_heading = re.search(r"^##\s+\S", body[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(body)
+        raw = body[start:end]
+
+        packages: list[Package] = []
+        first_style: str | None = None
+        for space in _EVENT_SPACE_LINK_RE.finditer(raw):
+            inner = space.group("body")
+            title_match = _BOLD_TITLE_RE.search(inner)
+            title = clean_or_none(title_match.group("title")) if title_match else None
+
+            segments: list[str] = []
+            parts = re.split(r"[ \t]*\\?\s*\n[ \t]*\\?\s*", inner)
+            for part in parts:
+                text = unescape(part).strip()
+                text = re.sub(r"!\[.*?\]\([^)]+\)", "", text).strip()
+                text = re.sub(r"\*\*", "", text).strip()
+                if not text:
+                    continue
+                if text.lower() in _SENTINELS:
+                    continue
+                if title and text == title:
+                    continue
+                # Skip summary-style "200 max standing" lines if any leak in
+                if re.match(r"^\d+\s+max\s+(standing|seated)\s*$", text, re.I):
+                    continue
+                segments.append(text)
+
+            offerings: list[str] = []
+            i = 0
+            while i < len(segments):
+                seg = segments[i]
+                if (
+                    seg.isdigit()
+                    and i + 1 < len(segments)
+                    and segments[i + 1].lower() in {"seated", "standing"}
+                ):
+                    offerings.append(f"{seg} {segments[i + 1].capitalize()}")
+                    i += 2
+                    continue
+                if seg.isdigit():
+                    # Leading photo-count digit on the card, not capacity
+                    i += 1
+                    continue
+                offerings.append(seg)
+                if first_style is None:
+                    first_style = seg
+                i += 1
+
+            if not title and not offerings:
+                continue
+            packages.append(Package(title=title, offerings=offerings))
+
+        return self._none_if_empty(packages), first_style
 
     def _parse_response_time(self, body: str) -> str | None:
         match = _RESPONSE_RE.search(body)

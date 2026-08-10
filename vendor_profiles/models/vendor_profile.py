@@ -172,6 +172,7 @@ class VendorProfile(BaseModel):
     slug: Optional[str] = None
     website: Optional[str] = None
     profile_picture: Optional[str] = None
+    unclaimed: Optional[bool] = None
 
     # What they do
     categories: Optional[list[Category]] = None
