@@ -12,6 +12,7 @@ from vendor_profiles.sources import DISABLED_STAGE_SCRAPE_HOSTS
 SCRAPE_ELIGIBLE_STATUSES = ("staged", "failed")
 EXTRACT_ELIGIBLE_STATUS = "scraped"
 EXTRACTED_STATUS = "extracted"
+EXTRACTION_FAILED_STATUS = "extraction_failed"
 
 
 def _scrape_host_exclusion_query() -> dict | None:
@@ -40,6 +41,10 @@ class VendorsScrapedProfilesRepository:
             [("page_url", ASCENDING)],
             unique=True,
             name="page_url_unique",
+        )
+        await self._collection.create_index(
+            [("status", ASCENDING), ("_id", ASCENDING)],
+            name="status_id_idx",
         )
         await self._collection.create_index(
             [("status", ASCENDING)],
@@ -114,14 +119,10 @@ class VendorsScrapedProfilesRepository:
     async def list_extract_candidates(self, limit: int) -> list[dict]:
         if limit < 1:
             raise ValueError("limit must be >= 1")
-        cursor = (
-            self._collection.find(
-                {"status": EXTRACT_ELIGIBLE_STATUS},
-                {"page_url": 1},
-            )
-            .sort("_id", ASCENDING)
-            .limit(limit)
-        )
+        cursor = self._collection.find(
+            {"status": EXTRACT_ELIGIBLE_STATUS},
+            {"page_url": 1},
+        ).limit(limit)
         docs: list[dict] = []
         async for doc in cursor:
             page_url = doc.get("page_url")
@@ -167,6 +168,12 @@ class VendorsScrapedProfilesRepository:
         await self._collection.update_one(
             {"page_url": page_url},
             {"$set": {"status": "failed", "error": error}},
+        )
+
+    async def mark_extraction_failed(self, page_url: str, error: str) -> None:
+        await self._collection.update_one(
+            {"page_url": page_url},
+            {"$set": {"status": EXTRACTION_FAILED_STATUS, "error": error}},
         )
 
     async def find_scraped_by_page_url(self, page_url: str) -> dict | None:

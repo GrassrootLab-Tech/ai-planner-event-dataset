@@ -31,7 +31,7 @@ from vendor_profiles.parsers.text import (
     strip_md_escapes,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME
+from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, country_for_us_state
 
 _SENTINELS = frozenset(
     {
@@ -327,8 +327,6 @@ class GigSaladProfileParser(VendorProfileParser):
         if not money:
             return None, None
         amount, per = money
-        if per in {"and", "up", "amp"}:
-            per = "event"
         return [Price(amount=amount, per=per)], PriceRange(min_price=amount)
 
     def _parse_rating(self, header: str) -> float | None:
@@ -386,7 +384,9 @@ class GigSaladProfileParser(VendorProfileParser):
             location = Location(
                 city=city,
                 state=state_name,
-                country="US",
+                country=country_for_us_state(
+                    state=state_name, state_code=state_code
+                ),
                 raw_location=raw_location,
             )
 
@@ -439,6 +439,8 @@ class GigSaladProfileParser(VendorProfileParser):
                 if not label:
                     continue
                 key = label.lower()
+                if "frequently asked questions" in key:
+                    continue
                 if key in seen:
                     continue
                 seen.add(key)
@@ -572,6 +574,17 @@ class GigSaladProfileParser(VendorProfileParser):
                 items.append(para)
         return self._none_if_empty(items)
 
+    @staticmethod
+    def _is_junk_setup_item(text: str) -> bool:
+        lower = text.lower().strip()
+        if "report this profile" in lower:
+            return True
+        if "gigsalad.com/cdn-cgi/image" in lower:
+            return True
+        if re.match(r"^!\[.*\]\(https?://(?:www\.)?gigsalad\.com/", text.strip()):
+            return True
+        return False
+
     def _parse_setup_requirements(self, body: str) -> list[SetupRequirement] | None:
         raw = section(body, "Setup requirements", level=3)
         if not raw:
@@ -583,11 +596,17 @@ class GigSaladProfileParser(VendorProfileParser):
         if len(numbered) > 1:
             for chunk in numbered[1:]:
                 text = re.sub(r"\s+", " ", chunk).strip()
-                if text and text.lower() not in _SENTINELS:
+                if (
+                    text
+                    and text.lower() not in _SENTINELS
+                    and not self._is_junk_setup_item(text)
+                ):
                     items.append(text)
         else:
             for para in paragraphs(cleaned):
-                if para.lower() not in _SENTINELS:
+                if para.lower() not in _SENTINELS and not self._is_junk_setup_item(
+                    para
+                ):
                     items.append(para)
 
         requirements = [SetupRequirement(description=item) for item in items]

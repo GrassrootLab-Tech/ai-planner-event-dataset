@@ -486,6 +486,7 @@ async def run_extract(
     concurrency: int = 3,
     run_sample: bool = False,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    write_cost_report: bool = True,
 ) -> list[ExtractOutcome]:
     set_log_stage("vendor_extract")
     if concurrency < 1:
@@ -596,11 +597,13 @@ async def run_extract(
 
         results = await map_concurrent(pages, concurrency, extract_one)
 
-        report_path = _write_extract_cost_report(
-            results,
-            model=settings.anthropic_link_filter_model,
-            started_at=started_at,
-        )
+        report_path: Path | None = None
+        if write_cost_report:
+            report_path = _write_extract_cost_report(
+                results,
+                model=settings.anthropic_link_filter_model,
+                started_at=started_at,
+            )
 
         total_usage = TokenUsage()
         tallies: dict[str, int] = {}
@@ -625,9 +628,10 @@ async def run_extract(
             "haiku_input_tokens": total_usage.input_tokens,
             "haiku_output_tokens": total_usage.output_tokens,
             "total_haiku_cost_usd": round(total_haiku_cost, 6),
-            "cost_report_path": str(report_path),
             **tallies,
         }
+        if report_path is not None:
+            summary["cost_report_path"] = str(report_path)
         log_pretty("Vendor extract summary", summary)
         print("Vendor extract summary:")
         for key, value in summary.items():

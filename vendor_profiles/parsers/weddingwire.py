@@ -32,7 +32,11 @@ from vendor_profiles.parsers.text import (
     strip_tracking_params,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, US_STATE_NAMES
+from vendor_profiles.parsers.us_states import (
+    STATE_CODE_TO_NAME,
+    US_STATE_NAMES,
+    country_for_us_state,
+)
 
 _H1_RE = re.compile(r"^#\s+(?P<name>.+)\s*$", re.MULTILINE)
 _BODY_START = "<!--THE END-->"
@@ -61,9 +65,6 @@ _PACKAGE_PRICE_RE = re.compile(
 _DURATION_RE = re.compile(r"^(?P<hours>\d+(?:\.\d+)?)\s+hours?\s*$", re.IGNORECASE)
 _YEARS_RE = re.compile(r"(?P<years>\d+)\+?\s+years?\s+in\s+business", re.IGNORECASE)
 _SPEAKS_RE = re.compile(r"We speak\s+(?P<langs>.+)$", re.IGNORECASE)
-_OWNER_LINE_RE = re.compile(
-    r"^(?P<name>[A-Za-z][A-Za-z .'-]+),\s*(?P<role>.+)$"
-)
 _CITY_STATE_RE = re.compile(
     r"(?P<city>[A-Za-z .'-]+),\s*(?P<st>[A-Z]{2})\b"
 )
@@ -145,7 +146,6 @@ class WeddingWireProfileParser(VendorProfileParser):
         faqs_info = self._parse_faqs(body)
         location, service_area = self._parse_map(body)
         portfolio, profile_picture = self._parse_media(body)
-        owner = self._parse_owner(body)
         categories, chips = self._parse_categories_and_chips(body)
 
         services = list(faqs_info.get("services") or [])
@@ -156,12 +156,9 @@ class WeddingWireProfileParser(VendorProfileParser):
         return VendorProfile(
             business_name=business_name,
             slug=self._slug_from_url(page_url),
-            first_name=owner.get("first_name"),
-            last_name=owner.get("last_name"),
             phone_number=self._parse_phone(body),
             business_type=self._parse_business_type(body),
             tagline=self._parse_tagline(body, business_name),
-            website=self._parse_website(body),
             profile_picture=profile_picture,
             categories=categories,
             description=about.get("description"),
@@ -283,34 +280,6 @@ class WeddingWireProfileParser(VendorProfileParser):
         if not match:
             return None
         return clean_or_none(match.group(0))
-
-    def _parse_owner(self, body: str) -> dict:
-        result: dict = {}
-        # Owner line sits near "$… starting price"
-        price_m = _STARTING_PRICE_RE.search(body)
-        if not price_m:
-            return result
-        # Scan a window before the price for "Name, Role"
-        window = body[max(0, price_m.start() - 400) : price_m.start()]
-        lines = [unescape(ln).strip() for ln in window.splitlines()]
-        lines = [ln for ln in lines if ln]
-        for line in reversed(lines):
-            if line.startswith("!") or line.startswith("["):
-                continue
-            match = _OWNER_LINE_RE.match(line)
-            if not match:
-                continue
-            name = clean_or_none(match.group("name"))
-            if not name:
-                continue
-            parts = name.split()
-            if len(parts) >= 2:
-                result["first_name"] = parts[0]
-                result["last_name"] = " ".join(parts[1:])
-            else:
-                result["first_name"] = name
-            return result
-        return result
 
     def _parse_categories_and_chips(
         self, body: str
@@ -840,7 +809,9 @@ class WeddingWireProfileParser(VendorProfileParser):
                     location = Location(
                         city=city,
                         state=state_name,
-                        country="US",
+                        country=country_for_us_state(
+                            state=state_name, state_code=st
+                        ),
                         raw_location=text,
                     )
                     service_area = ServiceArea(
@@ -858,7 +829,7 @@ class WeddingWireProfileParser(VendorProfileParser):
             location = Location(
                 city=city,
                 state=state_name,
-                country="US",
+                country=country_for_us_state(state=state_name, state_code=st),
                 raw_location=text,
             )
             service_area = ServiceArea(
@@ -905,10 +876,11 @@ class WeddingWireProfileParser(VendorProfileParser):
                 continue
             city = clean_or_none(cs.group("city"))
             st = cs.group("st")
+            state_name = STATE_CODE_TO_NAME.get(st)
             return Location(
                 city=city,
-                state=STATE_CODE_TO_NAME.get(st),
-                country="US",
+                state=state_name,
+                country=country_for_us_state(state=state_name, state_code=st),
                 raw_location=label,
             )
         return None
@@ -933,22 +905,6 @@ class WeddingWireProfileParser(VendorProfileParser):
         else:
             digits = re.sub(r"\D", "", tel)
         return digits or None
-
-    def _parse_website(self, body: str) -> str | None:
-        # "Visit website" is usually bare text; only accept real external links
-        # labeled as website (rare on WeddingWire markdown).
-        for match in _LINK_RE.finditer(body):
-            label = unescape(match.group("label") or "").strip().lower()
-            if "website" not in label and label != "visit website":
-                continue
-            url = absolute_url(match.group("url").strip())
-            if not url:
-                continue
-            host = urlparse(url).netloc.lower()
-            if "weddingwire.com" in host:
-                continue
-            return strip_tracking_params(url) or None
-        return None
 
     # ------------------------------------------------------------------
     # Social / awards / media

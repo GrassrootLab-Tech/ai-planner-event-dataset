@@ -57,6 +57,7 @@ SCRAPE_HOSTS: tuple[str, ...] = (
 
 DEFAULT_TOTAL = 47_000
 DEFAULT_CONCURRENCY = 3
+CANDIDATE_BATCH_SIZE = 100
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output"
 
 
@@ -132,40 +133,77 @@ async def _load_candidates(
     profiles_coll,
     serp_meta: dict[str, tuple[str, str]],
 ) -> dict[str, list[ProfileCandidate]]:
-    """Load scrape-eligible profiles per host (Thumbtack never included)."""
+    """Load scrape-eligible profiles per host (Thumbtack never included).
+
+    Pages Mongo in batches of CANDIDATE_BATCH_SIZE via ``_id`` range queries,
+    then combines everything in memory for balanced selection.
+    """
     by_host: dict[str, list[ProfileCandidate]] = {h: [] for h in SCRAPE_HOSTS}
     host_set = set(SCRAPE_HOSTS)
+    projection = {"_id": 1, "page_url": 1, "parent_page_url": 1, "status": 1}
 
-    cursor = profiles_coll.find(
-        {"status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)}},
-        {"page_url": 1, "parent_page_url": 1, "status": 1},
-    )
-    async for doc in cursor:
-        page_url = doc.get("page_url")
-        if not isinstance(page_url, str) or not page_url.strip():
-            continue
-        host = normalize_source_host(page_url)
-        if host not in host_set:
-            continue
+    last_id = None
+    scanned = 0
+    while True:
+        query: dict[str, Any] = {
+            "status": {"$in": list(SCRAPE_ELIGIBLE_STATUSES)},
+        }
+        if last_id is not None:
+            query["_id"] = {"$gt": last_id}
 
-        parent = doc.get("parent_page_url")
-        parent_url = parent.strip() if isinstance(parent, str) and parent.strip() else None
-
-        cat, city = ("", "")
-        if page_url in serp_meta:
-            cat, city = serp_meta[page_url]
-        elif parent_url and parent_url in serp_meta:
-            cat, city = serp_meta[parent_url]
-
-        by_host[host].append(
-            ProfileCandidate(
-                page_url=page_url,
-                host=host,
-                category_slug=cat,
-                city_slug=city,
-                parent_page_url=parent_url,
-            )
+        batch = await (
+            profiles_coll.find(query, projection)
+            .sort("_id", 1)
+            .limit(CANDIDATE_BATCH_SIZE)
+            .to_list(length=CANDIDATE_BATCH_SIZE)
         )
+        if not batch:
+            break
+
+        for doc in batch:
+            page_url = doc.get("page_url")
+            if not isinstance(page_url, str) or not page_url.strip():
+                continue
+            host = normalize_source_host(page_url)
+            if host not in host_set:
+                continue
+
+            parent = doc.get("parent_page_url")
+            parent_url = (
+                parent.strip()
+                if isinstance(parent, str) and parent.strip()
+                else None
+            )
+
+            cat, city = ("", "")
+            if page_url in serp_meta:
+                cat, city = serp_meta[page_url]
+            elif parent_url and parent_url in serp_meta:
+                cat, city = serp_meta[parent_url]
+
+            by_host[host].append(
+                ProfileCandidate(
+                    page_url=page_url,
+                    host=host,
+                    category_slug=cat,
+                    city_slug=city,
+                    parent_page_url=parent_url,
+                )
+            )
+
+        last_id = batch[-1]["_id"]
+        scanned += len(batch)
+        if scanned % 5_000 == 0:
+            logger.info(
+                "Candidate load progress: scanned %d docs…",
+                scanned,
+            )
+
+    logger.info(
+        "Candidate load done: scanned %d docs, kept %d across hosts",
+        scanned,
+        sum(len(v) for v in by_host.values()),
+    )
     return by_host
 
 

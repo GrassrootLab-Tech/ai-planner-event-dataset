@@ -187,6 +187,7 @@ class VendorProfile(BaseModel):
     genres_or_styles: Optional[list[str]] = None
     song_list: Optional[list[str]] = None
     years_in_business: Optional[YearsInBusiness] = None
+    member_since: Optional[int] = None  # TheBash "Member Since YYYY" only
     gig_length: Optional[GigLength] = None
     unions: Optional[list[str]] = None
     influences_and_inspiration: Optional[list[str]] = None
@@ -196,6 +197,7 @@ class VendorProfile(BaseModel):
 
     # Media
     portfolio_files: Optional[list[PortfolioFile]] = None
+    downloadable_attachments: Optional[list[str]] = None
 
     # Location & travel
     location: Optional[Location] = None

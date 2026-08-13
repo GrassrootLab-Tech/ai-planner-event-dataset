@@ -261,7 +261,12 @@ def extract_vendor_profile_urls(
         raw_cleaned = raw.strip()
         if not raw_cleaned:
             continue
+        # Fragment-only or section anchors (#reviews, #map) are not vendor pages.
+        if "#" in raw_cleaned:
+            continue
         full_url = urljoin(page_url, raw_cleaned)
+        if "#" in full_url:
+            continue
         cleaned = clean_page_url(full_url)
         if not cleaned or cleaned in seen:
             continue

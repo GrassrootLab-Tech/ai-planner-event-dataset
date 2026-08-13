@@ -28,7 +28,7 @@ from vendor_profiles.parsers.text import (
     strip_media_variant,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME
+from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, country_for_us_state
 
 _H1_RE = re.compile(r"^#\s+(?P<name>.+)\s*$", re.MULTILINE)
 _RATING_RE = re.compile(
@@ -808,14 +808,15 @@ class TheKnotProfileParser(VendorProfileParser):
             if loc_m:
                 city = clean_or_none(loc_m.group("city"))
                 st = loc_m.group("st")
+                state_name = STATE_CODE_TO_NAME.get(st)
                 location = Location(
                     city=city,
-                    state=STATE_CODE_TO_NAME.get(st),
-                    country="US",
+                    state=state_name,
+                    country=country_for_us_state(state=state_name, state_code=st),
                     raw_location=f"{city}, {st}" if city else left,
                 )
             else:
-                location = Location(raw_location=left or None, country="US")
+                location = Location(raw_location=left or None)
             svc_m = _CITY_STATE_RE.search(right) if right else None
             if svc_m:
                 service_area = ServiceArea(
@@ -861,10 +862,13 @@ class TheKnotProfileParser(VendorProfileParser):
                             can_travel_nationwide=True if nationwide else None,
                         )
                     if location is None:
+                        state_name = STATE_CODE_TO_NAME.get(st)
                         location = Location(
                             city=city,
-                            state=STATE_CODE_TO_NAME.get(st),
-                            country="US",
+                            state=state_name,
+                            country=country_for_us_state(
+                                state=state_name, state_code=st
+                            ),
                             raw_location=f"{city}, {st}",
                         )
                     break
@@ -889,10 +893,11 @@ class TheKnotProfileParser(VendorProfileParser):
             if slug_m:
                 city = slug_m.group("city").replace("-", " ").title()
                 st = slug_m.group("st").upper()
+                state_name = STATE_CODE_TO_NAME.get(st)
                 location = Location(
                     city=city,
-                    state=STATE_CODE_TO_NAME.get(st),
-                    country="US",
+                    state=state_name,
+                    country=country_for_us_state(state=state_name, state_code=st),
                     raw_location=f"{city}, {st}",
                 )
 
@@ -1064,6 +1069,12 @@ class TheKnotProfileParser(VendorProfileParser):
             return None
 
         name = lines[0] if lines else None
+        if name and re.match(
+            r"^Showing slide number \d+ out of \d+$",
+            name.strip(),
+            re.IGNORECASE,
+        ):
+            return None
         role = None
         bio_start = 1
         if len(lines) > 1 and len(lines[1].split()) <= 4 and "." not in lines[1]:

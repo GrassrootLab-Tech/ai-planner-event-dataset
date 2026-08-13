@@ -21,6 +21,16 @@ from vendor_profiles.db.profiles_repo import (
 from vendor_profiles.parsers import get_parser_for_url
 from vendor_profiles.parsers.base import VendorProfileParser
 
+# Scrape error payloads sometimes land in markdown as-is; do not extract these.
+_SCRAPE_ERROR_MARKERS = (
+    "timeout: pool waiting exceeded",
+    "403 ERROR",
+)
+
+
+def _markdown_has_scrape_error(markdown: str) -> bool:
+    return any(marker in markdown for marker in _SCRAPE_ERROR_MARKERS)
+
 
 def source_from_page_url(page_url: str) -> str:
     host = urlparse(page_url).netloc.lower()
@@ -60,6 +70,14 @@ class VendorExtractService:
         self._get_parser = get_parser
 
     async def extract_url(self, page_url: str) -> ExtractOutcome:
+        # Fragment URLs (#deals, #reviews) are page sections, not vendor profiles.
+        if "#" in page_url:
+            return ExtractOutcome(
+                page_url=page_url,
+                outcome="skipped",
+                detail="page_url has # fragment; not a vendor profile URL",
+            )
+
         doc = await self._profiles.find_scraped_by_page_url(page_url)
         if doc is None:
             return ExtractOutcome(
@@ -88,6 +106,17 @@ class VendorExtractService:
                 page_url=page_url,
                 outcome="skipped",
                 detail="empty or missing markdown",
+            )
+
+        if _markdown_has_scrape_error(markdown):
+            await self._profiles.mark_failed(
+                page_url,
+                "markdown contains scrape error (timeout pool / 403 ERROR)",
+            )
+            return ExtractOutcome(
+                page_url=page_url,
+                outcome="skipped",
+                detail="scrape error in markdown (timeout/403); marked failed",
             )
 
         html = doc.get("html") if isinstance(doc.get("html"), str) else None
@@ -155,6 +184,7 @@ class VendorExtractService:
             )
         except Exception as exc:
             logger.exception("extract failed for %s", page_url)
+            await self._profiles.mark_extraction_failed(page_url, str(exc))
             return ExtractOutcome(
                 page_url=page_url,
                 outcome="error",

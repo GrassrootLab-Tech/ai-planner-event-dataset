@@ -99,16 +99,20 @@ PAGE_URLS: list[dict[str, str | None]] = [
     #     "page_url": "https://www.eventective.com/broomfield-co/the-fever-517211.html",
     #     "page_title": "The Fever 517211",
     # },
+    # {
+    #     "page_url": "https://www.partyslate.com/venues/international-country-club",
+    #     "page_title": "International Country Club | Fairfax Venue | PartySlate",
+    # },
+    # {
+    #     "page_url": "https://www.partyslate.com/venues/weddings-in-waterford",
+    #     "page_title": "Weddings In Waterford | Waterford Venue | PartySlate",
+    # },
+    # {
+    #     "page_url": "https://www.partyslate.com/venues/48-fields",
+    #     "page_title": "48 Fields | Leesburg Venue | PartySlate",
+    # },
     {
-        "page_url": "https://www.partyslate.com/venues/international-country-club",
-        "page_title": "International Country Club | Fairfax Venue | PartySlate",
-    },
-    {
-        "page_url": "https://www.partyslate.com/venues/weddings-in-waterford",
-        "page_title": "Weddings In Waterford | Waterford Venue | PartySlate",
-    },
-    {
-        "page_url": "https://www.partyslate.com/venues/48-fields",
-        "page_title": "48 Fields | Leesburg Venue | PartySlate",
+        "page_url": "https://www.thebash.com/juggler/elite-entertainment",
+        "page_title": "Elite Entertainment",
     },
 ]

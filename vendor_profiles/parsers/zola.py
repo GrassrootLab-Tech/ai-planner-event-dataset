@@ -28,7 +28,11 @@ from vendor_profiles.parsers.text import (
     strip_tracking_params,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, US_STATE_NAMES
+from vendor_profiles.parsers.us_states import (
+    STATE_CODE_TO_NAME,
+    US_STATE_NAMES,
+    country_for_us_state,
+)
 
 _H1_RE = re.compile(r"^#\s+(?P<name>.+)\s*$", re.MULTILINE)
 _BREADCRUMB_START = "- [Wedding Vendors](/wedding-vendors)/"
@@ -447,7 +451,7 @@ class ZolaProfileParser(VendorProfileParser):
             location = Location(
                 city=city,
                 state=state_name,
-                country="US",
+                country=country_for_us_state(state=state_name, state_code=st),
                 raw_location=f"{city}, {st}" if city else label,
             )
             service_area = ServiceArea(

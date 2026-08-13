@@ -7,8 +7,8 @@ def strip_trailing_slash(page_url: str) -> str:
 
 
 def clean_page_url(page_url: str) -> str:
-    """Strip query params and trailing slash/backslash from a page URL."""
-    page_url = page_url.split("?", 1)[0]
+    """Strip query params, URL fragments, and trailing slash/backslash."""
+    page_url = page_url.split("?", 1)[0].split("#", 1)[0]
     return strip_trailing_slash(page_url)
 
 

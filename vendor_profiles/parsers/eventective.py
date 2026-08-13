@@ -20,7 +20,7 @@ from vendor_profiles.parsers.text import (
     absolute_url,
     clean_or_none,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME
+from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, country_for_us_state
 
 _H1_RE = re.compile(r"^#\s+(?P<name>.+)\s*$", re.MULTILINE)
 _FOOTER_START = "## Eventective"
@@ -248,7 +248,7 @@ class EventectiveProfileParser(VendorProfileParser):
         return Location(
             city=city,
             state=state,
-            country="US",
+            country=country_for_us_state(state=state, state_code=st),
             raw_location=raw,
         )
 

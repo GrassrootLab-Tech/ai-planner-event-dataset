@@ -30,7 +30,7 @@ from vendor_profiles.parsers.text import (
     section,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME
+from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, country_for_us_state
 from vendor_profiles.partyslate_listing_api import is_partyslate_venue_profile
 
 _SENTINELS = frozenset(
@@ -122,6 +122,9 @@ _OUTSIDE_POLICY_RE = re.compile(
     re.MULTILINE | re.IGNORECASE,
 )
 _UNCLAIMED_RE = re.compile(r"^Unclaimed\s*$", re.MULTILINE | re.IGNORECASE)
+_DOWNLOAD_LINK_RE = re.compile(
+    r"\[(?P<label>[^\]]*)\]\((?P<url>https?://[^)\s]+)\)",
+)
 
 
 class PartySlateProfileParser(VendorProfileParser):
@@ -174,6 +177,7 @@ class PartySlateProfileParser(VendorProfileParser):
             price_range=pricing.get("price_range"),
             past_events=self._parse_albums(body),
             portfolio_files=portfolio,
+            downloadable_attachments=pricing.get("downloadable_attachments"),
             profile_picture=profile_picture,
             team=team,
             logistic_details=logistic_details,
@@ -231,6 +235,7 @@ class PartySlateProfileParser(VendorProfileParser):
             price_range=pricing.get("price_range"),
             past_events=self._parse_albums(body),
             portfolio_files=portfolio,
+            downloadable_attachments=pricing.get("downloadable_attachments"),
             profile_picture=profile_picture,
             team=team,
             logistic_details=logistic_details,
@@ -376,13 +381,20 @@ class PartySlateProfileParser(VendorProfileParser):
         city = clean_or_none(match.group("city"))
         state_code = match.group("st")
         country_raw = clean_or_none(match.group("country"))
-        country = "US" if country_raw and country_raw.upper() in {"USA", "US"} else country_raw
+        if country_raw and country_raw.upper() in {"USA", "US"}:
+            country = "US"
+        elif country_raw:
+            country = country_raw
+        else:
+            country = country_for_us_state(state_code=state_code)
         state_name = STATE_CODE_TO_NAME.get(state_code)
         raw_location = f"{city}, {state_code}" if city and state_code else None
         location = Location(
             city=city,
             state=state_name,
-            country=country,
+            country=country or country_for_us_state(
+                state=state_name, state_code=state_code
+            ),
             raw_location=raw_location,
         )
         service_area = ServiceArea(
@@ -402,17 +414,19 @@ class PartySlateProfileParser(VendorProfileParser):
         state_code = match.group("st")
         zip_code = clean_or_none(match.group("zip"))
         country_raw = clean_or_none(match.group("country"))
-        country = (
-            "US"
-            if country_raw and country_raw.upper() in {"USA", "US"}
-            else country_raw
-        )
+        if country_raw and country_raw.upper() in {"USA", "US"}:
+            country = "US"
+        elif country_raw:
+            country = country_raw
+        else:
+            country = None
         state_name = STATE_CODE_TO_NAME.get(state_code)
         raw_location = clean_or_none(match.group("raw"))
         location = Location(
             city=city,
             state=state_name,
-            country=country,
+            country=country
+            or country_for_us_state(state=state_name, state_code=state_code),
             raw_location=raw_location,
         )
         service_area = ServiceArea(
@@ -629,12 +643,29 @@ class PartySlateProfileParser(VendorProfileParser):
             "packages": None,
             "prices": None,
             "price_range": None,
+            "downloadable_attachments": None,
         }
         raw = section(body, "Pricing Packages", level=2)
         packages: list[Package] = []
         min_amounts: list[float] = []
+        attachments: list[str] = []
+        seen_attachments: set[str] = set()
 
         if raw and "hasn't listed their pricing" not in unescape(raw).lower():
+            for link in _DOWNLOAD_LINK_RE.finditer(raw):
+                label = unescape(link.group("label") or "").strip().lower()
+                url = absolute_url(link.group("url").strip())
+                if not url or url in seen_attachments:
+                    continue
+                url_lower = url.lower()
+                if (
+                    "download" in label
+                    or url_lower.endswith(".pdf")
+                    or "prices-pdf" in url_lower
+                ):
+                    seen_attachments.add(url)
+                    attachments.append(url)
+
             for match in _PACKAGE_BLOCK_RE.finditer(raw):
                 title = clean_or_none(match.group("title").split("\n", 1)[0])
                 block = match.group(0)
@@ -644,6 +675,9 @@ class PartySlateProfileParser(VendorProfileParser):
                     if not text or text.startswith("- ###"):
                         continue
                     if text.lower() in {"request a quote", "view all"}:
+                        continue
+                    # Skip download link lines from package description/offerings
+                    if _DOWNLOAD_LINK_RE.search(text):
                         continue
                     content_lines.append(text)
 
@@ -656,8 +690,6 @@ class PartySlateProfileParser(VendorProfileParser):
                     money = parse_money(line)
                     if money:
                         amount, per = money
-                        if per in {"and", "up", "amp", "spend"}:
-                            per = "event"
                         package_prices.append(Price(amount=amount, per=per))
                         min_amounts.append(amount)
                         used_indices.add(i)
@@ -707,6 +739,7 @@ class PartySlateProfileParser(VendorProfileParser):
                     pkg.offerings = list(html_pkg.offerings)
 
         result["packages"] = self._none_if_empty(packages)
+        result["downloadable_attachments"] = self._none_if_empty(attachments)
         if min_amounts:
             lo = min(min_amounts)
             result["price_range"] = PriceRange(min_price=lo)

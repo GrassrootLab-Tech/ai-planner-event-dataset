@@ -30,7 +30,7 @@ from vendor_profiles.parsers.text import (
     parse_money,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME
+from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, country_for_us_state
 
 _H1_RE = re.compile(r"^#\s+(?P<name>.+)\s*$", re.MULTILINE)
 _TAGLINE_RE = re.compile(
@@ -596,7 +596,9 @@ class ThumbtackProfileParser(VendorProfileParser):
         location = Location(
             city=city,
             state=state_name,
-            country="US",
+            country=country_for_us_state(
+                state=state_name, state_code=state_code
+            ),
             raw_location=raw,
         )
         service_area = ServiceArea(

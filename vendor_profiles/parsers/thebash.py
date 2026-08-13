@@ -12,7 +12,6 @@ from vendor_profiles.models.vendor_profile import (
     ServiceArea,
     VendorEvent,
     VendorProfile,
-    YearsInBusiness,
 )
 from vendor_profiles.parsers.base import VendorProfileParser
 from vendor_profiles.parsers.text import (
@@ -24,7 +23,11 @@ from vendor_profiles.parsers.text import (
     strip_media_variant,
     unescape,
 )
-from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, US_STATE_NAMES
+from vendor_profiles.parsers.us_states import (
+    STATE_CODE_TO_NAME,
+    US_STATE_NAMES,
+    country_for_us_state,
+)
 
 _SENTINELS = frozenset(
     {
@@ -137,7 +140,7 @@ class TheBashProfileParser(VendorProfileParser):
             prices=prices,
             rating_average=self._parse_rating(body),
             times_booked=self._parse_bookings(body),
-            years_in_business=self._parse_member_since(body),
+            member_since=self._parse_member_since(body),
             verified_badges=badges,
             reviews=reviews,
             portfolio_files=portfolio,
@@ -161,7 +164,10 @@ class TheBashProfileParser(VendorProfileParser):
         path = urlparse(page_url).path.rstrip("/")
         if not path:
             return None
-        return path.rsplit("/", 1)[-1] or None
+        parts = [p for p in path.split("/") if p]
+        if len(parts) >= 2:
+            return f"{parts[-2]}-{parts[-1]}"
+        return parts[-1] if parts else None
 
     @staticmethod
     def _none_if_empty(items: list | None):
@@ -342,7 +348,9 @@ class TheBashProfileParser(VendorProfileParser):
             location = Location(
                 city=city or None,
                 state=state_name or None,
-                country="US",
+                country=country_for_us_state(
+                    state=state_name, state_code=state_code
+                ),
                 raw_location=raw_location,
             )
 
@@ -462,11 +470,11 @@ class TheBashProfileParser(VendorProfileParser):
             return None
         return int(match.group(1))
 
-    def _parse_member_since(self, body: str) -> YearsInBusiness | None:
+    def _parse_member_since(self, body: str) -> int | None:
         match = _MEMBER_SINCE_RE.search(body)
         if not match:
             return None
-        return YearsInBusiness(start_year=int(match.group(1)))
+        return int(match.group(1))
 
     def _parse_badges(self, body: str) -> list[str] | None:
         header = body.split("## About Vendor", 1)[0]

@@ -57,3 +57,15 @@ US_STATE_NAMES: dict[str, str] = {
 STATE_CODE_TO_NAME: dict[str, str] = {
     code: name.title() for name, code in US_STATE_NAMES.items()
 }
+
+
+def country_for_us_state(
+    state: str | None = None,
+    state_code: str | None = None,
+) -> str | None:
+    """Return 'US' when state or state_code maps to a known US state; else None."""
+    if state_code and state_code.strip().upper() in STATE_CODE_TO_NAME:
+        return "US"
+    if state and state.strip().lower() in US_STATE_NAMES:
+        return "US"
+    return None

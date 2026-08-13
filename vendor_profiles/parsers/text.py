@@ -25,6 +25,7 @@ _PER_ALIASES = {
     "guest": "person",
     "guests": "person",
 }
+_ALLOWED_PER = frozenset({"hour", "event", "person", "day"})
 _DATE_FORMATS = (
     "%B %d, %Y",
     "%b %d, %Y",
@@ -104,6 +105,8 @@ def parse_money(text: str) -> tuple[float, str] | None:
         return None
     unit_raw = (match.group(2) or "event").lower()
     per = _PER_ALIASES.get(unit_raw, unit_raw)
+    if per not in _ALLOWED_PER:
+        per = "event"
     return amount, per
 
 
