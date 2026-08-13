@@ -11,6 +11,10 @@ class VendorProfileParser(ABC):
     source_host: str
 
     @abstractmethod
+    def slug_from_url(self, page_url: str) -> str | None:
+        """Extract vendor slug from the page URL path (source-specific rules)."""
+
+    @abstractmethod
     def parse(
         self,
         page_url: str,

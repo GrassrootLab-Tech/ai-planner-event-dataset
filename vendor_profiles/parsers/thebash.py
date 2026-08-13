@@ -130,7 +130,7 @@ class TheBashProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._slug_from_url(page_url),
+            slug=self.slug_from_url(page_url),
             categories=categories,
             services_provided=services,
             description=description,
@@ -160,7 +160,7 @@ class TheBashProfileParser(VendorProfileParser):
         return markdown
 
     @staticmethod
-    def _slug_from_url(page_url: str) -> str | None:
+    def slug_from_url(page_url: str) -> str | None:
         path = urlparse(page_url).path.rstrip("/")
         if not path:
             return None

@@ -205,7 +205,7 @@ class ThumbtackProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=url_meta.get("slug"),
+            slug=self.slug_from_url(page_url),
             first_name=first_name,
             last_name=last_name,
             business_type=business_type,
@@ -292,6 +292,10 @@ class ThumbtackProfileParser(VendorProfileParser):
     # ------------------------------------------------------------------
     # URL / breadcrumb
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def slug_from_url(page_url: str) -> str | None:
+        return ThumbtackProfileParser._parse_url_meta(page_url).get("slug")
 
     @staticmethod
     def _parse_url_meta(page_url: str) -> dict:

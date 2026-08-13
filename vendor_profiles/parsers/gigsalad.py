@@ -175,7 +175,7 @@ class GigSaladProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._slug_from_url(page_url),
+            slug=self.slug_from_url(page_url),
             booking_url=self._booking_url(page_url),
             categories=categories,
             services_provided=services,
@@ -226,7 +226,7 @@ class GigSaladProfileParser(VendorProfileParser):
         return markdown[start:end].strip()
 
     @staticmethod
-    def _slug_from_url(page_url: str) -> str | None:
+    def slug_from_url(page_url: str) -> str | None:
         path = urlparse(page_url).path.rstrip("/")
         if not path:
             return None

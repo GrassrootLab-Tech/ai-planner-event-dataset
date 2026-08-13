@@ -2,6 +2,7 @@
 
   python -m vendor_profiles stage [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles stage --run-sample [--concurrency 3]
+  python -m vendor_profiles staging-dedupe [--concurrency 1000]
   python -m vendor_profiles scrape [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles extract [--batch-size 100] [--concurrency 3]
   python -m vendor_profiles extract --run-sample [--concurrency 3]
@@ -38,6 +39,7 @@ from vendor_profiles.db.extracted_profiles_repo import (
 )
 from vendor_profiles.db.profiles_repo import VendorsScrapedProfilesRepository
 from vendor_profiles.db.serp_results_repo import StagePage, VendorsSerpResultsRepository
+from vendor_profiles.dedupe_by_slug import partition_keepers_and_duplicates
 from vendor_profiles.sample_urls import PAGE_URLS
 from vendor_profiles.scripts.fetch_serp import DEFAULT_WORKERS, run_fetch_serp
 from vendor_profiles.scripts.poll_serp import run_poll_serp
@@ -52,6 +54,9 @@ from vendor_profiles.services.stage_service import (
 
 OUTPUT_DIR = VENDOR_OUTPUT_DIR
 DEFAULT_BATCH_SIZE = 100
+STAGING_DEDUPE_FETCH_PAGE_SIZE = 1000
+STAGING_DEDUPE_DELETE_BATCH_SIZE = 999  # less than 1000 per DB update
+STAGING_DEDUPE_DEFAULT_CONCURRENCY = 1000
 
 
 def _log_settings(settings: VendorSettings) -> None:
@@ -410,6 +415,126 @@ async def run_scrape_batch(
         await mongo.disconnect()
 
 
+async def run_staging_dedupe(
+    *,
+    concurrency: int = STAGING_DEDUPE_DEFAULT_CONCURRENCY,
+) -> list[int]:
+    set_log_stage("vendor_staging_dedupe")
+    if concurrency < 1:
+        raise ValueError("--concurrency must be >= 1")
+
+    settings = VendorSettings()
+    _log_settings(settings)
+
+    mongo = Mongo(settings.mongo_uri, settings.mongo_db_name)
+    await mongo.connect()
+    try:
+        profiles_repo = VendorsScrapedProfilesRepository(
+            mongo.db[settings.vendors_scraped_profiles_collection]
+        )
+        await profiles_repo.ensure_indexes()
+
+        page_urls: list[str] = []
+        skip = 0
+        while True:
+            page = await profiles_repo.list_staged_page(
+                skip=skip,
+                limit=STAGING_DEDUPE_FETCH_PAGE_SIZE,
+            )
+            if not page:
+                break
+            for doc in page:
+                page_urls.append(str(doc["page_url"]))
+            skip += len(page)
+            msg = (
+                f"staging-dedupe fetched {len(page)} "
+                f"(total {len(page_urls)})"
+            )
+            logger.info(msg)
+            print(msg)
+            if len(page) < STAGING_DEDUPE_FETCH_PAGE_SIZE:
+                break
+
+        if not page_urls:
+            logger.warning("No staged profiles to dedupe — nothing to do")
+            print("No staged profiles to dedupe — nothing to do")
+            return []
+
+        keepers, duplicates = partition_keepers_and_duplicates(page_urls)
+        logger.info(
+            "staging-dedupe partitioned: staged=%d keepers=%d duplicates=%d",
+            len(page_urls),
+            len(keepers),
+            len(duplicates),
+        )
+        print(
+            f"staging-dedupe partitioned: staged={len(page_urls)} "
+            f"keepers={len(keepers)} duplicates={len(duplicates)}"
+        )
+
+        if not duplicates:
+            summary = {
+                "staged_count": len(page_urls),
+                "duplicate_count": 0,
+                "deleted": 0,
+                "kept": len(keepers),
+            }
+            log_pretty("Vendor staging-dedupe summary", summary)
+            print("Vendor staging-dedupe summary:")
+            for key, value in summary.items():
+                print(f"  {key}: {value}")
+            return []
+
+        delete_batches = [
+            duplicates[i : i + STAGING_DEDUPE_DELETE_BATCH_SIZE]
+            for i in range(0, len(duplicates), STAGING_DEDUPE_DELETE_BATCH_SIZE)
+        ]
+        total_batches = len(delete_batches)
+        logger.info(
+            "Vendor staging-dedupe: deleting %d urls in %d batches "
+            "(<=%d each) concurrency=%d",
+            len(duplicates),
+            total_batches,
+            STAGING_DEDUPE_DELETE_BATCH_SIZE,
+            concurrency,
+        )
+
+        progress_lock = asyncio.Lock()
+        progress_done = 0
+
+        async def delete_batch(batch: list[str]) -> int:
+            nonlocal progress_done
+            deleted = await profiles_repo.delete_by_page_urls(batch)
+            async with progress_lock:
+                progress_done += 1
+                done = progress_done
+            msg = (
+                f"processing [{done} / {total_batches}] "
+                f"deleted={deleted} batch_size={len(batch)}"
+            )
+            logger.info(msg)
+            print(msg)
+            return deleted
+
+        results = await map_concurrent(delete_batches, concurrency, delete_batch)
+
+        deleted_count = sum(results)
+        summary = {
+            "staged_count": len(page_urls),
+            "duplicate_count": len(duplicates),
+            "deleted": deleted_count,
+            "kept": len(keepers),
+            "delete_batches": total_batches,
+        }
+        log_pretty("Vendor staging-dedupe summary", summary)
+        print("Vendor staging-dedupe summary:")
+        for key, value in summary.items():
+            print(f"  {key}: {value}")
+        return results
+    finally:
+        await mongo.disconnect()
+
+
 def _write_extract_cost_report(
     results: list[ExtractOutcome],
     *,
@@ -702,6 +827,23 @@ def main() -> None:
         help="Max URLs to scrape in parallel (default: 3)",
     )
 
+    dedupe_parser = sub.add_parser(
+        "staging-dedupe",
+        help=(
+            "Dedupe all staged profiles by (host, slug); keep first seen, "
+            "delete duplicate docs"
+        ),
+    )
+    dedupe_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=STAGING_DEDUPE_DEFAULT_CONCURRENCY,
+        help=(
+            "Max delete batches in parallel "
+            f"(default: {STAGING_DEDUPE_DEFAULT_CONCURRENCY})"
+        ),
+    )
+
     extract_parser = sub.add_parser(
         "extract",
         help=(
@@ -776,6 +918,16 @@ def main() -> None:
                 )
             )
             if sum(1 for r in results if not r.ok):
+                sys.exit(1)
+        elif args.command == "staging-dedupe":
+            set_log_stage("vendor_staging_dedupe")
+            results = asyncio.run(
+                run_staging_dedupe(
+                    concurrency=args.concurrency,
+                )
+            )
+            # Non-empty results are per-batch deleted counts; empty means nothing to do.
+            if results and sum(results) == 0:
                 sys.exit(1)
         elif args.command == "extract":
             set_log_stage("vendor_extract")

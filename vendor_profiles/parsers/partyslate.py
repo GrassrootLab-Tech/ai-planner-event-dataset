@@ -159,7 +159,7 @@ class PartySlateProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._slug_from_url(page_url),
+            slug=self.slug_from_url(page_url),
             phone_number=contact.get("phone_number"),
             website=contact.get("website"),
             unclaimed=self._parse_unclaimed(body),
@@ -215,7 +215,7 @@ class PartySlateProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._slug_from_url(page_url),
+            slug=self.slug_from_url(page_url),
             phone_number=contact.get("phone_number"),
             website=contact.get("website"),
             unclaimed=self._parse_unclaimed(body),
@@ -316,7 +316,7 @@ class PartySlateProfileParser(VendorProfileParser):
         return markdown[start:end].strip()
 
     @staticmethod
-    def _slug_from_url(page_url: str) -> str | None:
+    def slug_from_url(page_url: str) -> str | None:
         path = urlparse(page_url).path.rstrip("/")
         if not path:
             return None

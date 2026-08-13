@@ -155,7 +155,7 @@ class WeddingWireProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._slug_from_url(page_url),
+            slug=self.slug_from_url(page_url),
             phone_number=self._parse_phone(body),
             business_type=self._parse_business_type(body),
             tagline=self._parse_tagline(body, business_name),
@@ -201,7 +201,7 @@ class WeddingWireProfileParser(VendorProfileParser):
         return markdown[start:end].strip()
 
     @staticmethod
-    def _slug_from_url(page_url: str) -> str | None:
+    def slug_from_url(page_url: str) -> str | None:
         path = urlparse(page_url).path.rstrip("/")
         # /biz/<slug>/<id>.html
         parts = [p for p in path.split("/") if p]

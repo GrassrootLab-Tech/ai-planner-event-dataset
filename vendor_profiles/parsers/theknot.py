@@ -197,7 +197,7 @@ class TheKnotProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._slug_from_url(page_url),
+            slug=self.slug_from_url(page_url),
             tagline=self._parse_tagline(body),
             # Breadcrumbs sit after the profile body cut — use full markdown
             categories=self._parse_categories(markdown, services),
@@ -244,7 +244,7 @@ class TheKnotProfileParser(VendorProfileParser):
         return markdown[start:end].strip()
 
     @staticmethod
-    def _slug_from_url(page_url: str) -> str | None:
+    def slug_from_url(page_url: str) -> str | None:
         path = urlparse(page_url).path.rstrip("/")
         if not path:
             return None
@@ -888,7 +888,7 @@ class TheKnotProfileParser(VendorProfileParser):
 
         # URL slug fallback when location is missing or city-less
         if location is None or not location.city:
-            slug = self._slug_from_url(page_url) or ""
+            slug = self.slug_from_url(page_url) or ""
             slug_m = _SLUG_LOC_RE.search(slug)
             if slug_m:
                 city = slug_m.group("city").replace("-", " ").title()

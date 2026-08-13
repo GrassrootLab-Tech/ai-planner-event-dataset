@@ -116,6 +116,35 @@ class VendorsScrapedProfilesRepository:
                 docs.append({"page_url": page_url})
         return docs
 
+    async def list_staged_page(self, *, skip: int, limit: int) -> list[dict]:
+        """Page of staged profiles (no sort)."""
+        if skip < 0:
+            raise ValueError("skip must be >= 0")
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        cursor = (
+            self._collection.find(
+                {"status": "staged"},
+                {"page_url": 1},
+            )
+            .skip(skip)
+            .limit(limit)
+        )
+        docs: list[dict] = []
+        async for doc in cursor:
+            page_url = doc.get("page_url")
+            if isinstance(page_url, str) and page_url.strip():
+                docs.append({"page_url": page_url})
+        return docs
+
+    async def delete_by_page_urls(self, page_urls: list[str]) -> int:
+        if not page_urls:
+            return 0
+        result = await self._collection.delete_many(
+            {"page_url": {"$in": page_urls}}
+        )
+        return int(result.deleted_count)
+
     async def list_extract_candidates(self, limit: int) -> list[dict]:
         if limit < 1:
             raise ValueError("limit must be >= 1")

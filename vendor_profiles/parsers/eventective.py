@@ -130,7 +130,7 @@ class EventectiveProfileParser(VendorProfileParser):
 
         return VendorProfile(
             business_name=business_name,
-            slug=self._parse_slug(page_url),
+            slug=self.slug_from_url(page_url),
             phone_number=self._parse_phone(header),
             website=self._parse_website(header),
             business_type=business_type,
@@ -212,7 +212,7 @@ class EventectiveProfileParser(VendorProfileParser):
         return clean_or_none(match.group("name"))
 
     @staticmethod
-    def _parse_slug(page_url: str) -> str | None:
+    def slug_from_url(page_url: str) -> str | None:
         path = urlparse(page_url).path.rstrip("/")
         parts = [p for p in path.split("/") if p]
         if not parts:
