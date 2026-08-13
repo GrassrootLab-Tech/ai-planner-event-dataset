@@ -162,12 +162,38 @@ class VendorExtractService:
                 method = "haiku"
 
             profile_fields = profile.model_dump(mode="json", exclude_none=True)
+            slug = profile_fields.get("slug")
+            if not isinstance(slug, str) or not slug.strip():
+                return ExtractOutcome(
+                    page_url=page_url,
+                    outcome="skipped",
+                    detail="missing slug; not writing extracted profile",
+                    haiku_usage=usage,
+                    extraction_method=method,
+                )
             source = source_from_page_url(page_url)
-            await self._extracted.upsert_extracted(
+            written = await self._extracted.upsert_extracted(
                 page_url=page_url,
                 source=source,
                 profile_fields=profile_fields,
             )
+            if not written:
+                # Duplicate (page_url or source+slug); still mark so we don't retry.
+                marked = await self._profiles.mark_extracted(page_url)
+                if not marked:
+                    logger.warning(
+                        "Duplicate extract skipped but status was not %s for %s",
+                        EXTRACT_ELIGIBLE_STATUS,
+                        page_url,
+                    )
+                return ExtractOutcome(
+                    page_url=page_url,
+                    outcome="skipped",
+                    detail="duplicate page_url or source+slug",
+                    haiku_usage=usage,
+                    profile_payload=profile_fields,
+                    extraction_method=method,
+                )
             marked = await self._profiles.mark_extracted(page_url)
             if not marked:
                 logger.warning(

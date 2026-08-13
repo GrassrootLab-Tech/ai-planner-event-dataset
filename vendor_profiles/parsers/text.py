@@ -33,6 +33,13 @@ _DATE_FORMATS = (
     "%b %d %Y",
     "%m/%d/%Y",
 )
+MAX_CITY_LEN = 40
+MAX_MARKETS_SERVED = 30
+_MD_ESCAPE_RE = re.compile(r"\\([.\-_*`\[\]()#!])")
+_BADGE_JUNK_RE = re.compile(
+    r"packages?\s+starting|starting\s+at\s*\$|\bguests\b|sq\.?\s*feet|\bsq\s*ft\b",
+    re.IGNORECASE,
+)
 
 
 def unescape(text: str) -> str:
@@ -47,11 +54,49 @@ def unescape(text: str) -> str:
     return out.strip()
 
 
+def strip_md_escapes(text: str) -> str:
+    """Unescape common markdown escapes: \\-, 1\\., \\. → literal chars."""
+    if not text:
+        return ""
+    return _MD_ESCAPE_RE.sub(r"\1", text)
+
+
 def clean_or_none(text: str | None) -> str | None:
     if text is None:
         return None
-    cleaned = unescape(text)
+    cleaned = strip_md_escapes(unescape(text))
     return cleaned or None
+
+
+def sanitize_phone(tel: str | None) -> str | None:
+    """Keep plausible NANP phones; drop all-zeros / bad area codes / wrong length."""
+    if tel is None:
+        return None
+    raw = str(tel).strip()
+    if not raw:
+        return None
+    digits = re.sub(r"\D", "", raw)
+    if not digits or set(digits) <= {"0"}:
+        return None
+    if len(digits) == 11 and digits.startswith("1"):
+        national = digits[1:]
+        keep_plus = True
+    elif len(digits) == 10:
+        national = digits
+        keep_plus = raw.startswith("+")
+    else:
+        return None
+    # NANP area code cannot start with 0 or 1
+    if national[0] in "01":
+        return None
+    if keep_plus or len(digits) == 11:
+        return f"+1{national}"
+    return national
+
+
+def is_badge_junk(text: str) -> bool:
+    """Venue facts mistaken for badges (packages starting, guest counts, sq ft)."""
+    return bool(_BADGE_JUNK_RE.search(text or ""))
 
 
 def absolute_url(url: str) -> str | None:
@@ -123,16 +168,6 @@ def parse_date(text: str) -> date | None:
         except ValueError:
             continue
     return None
-
-
-_MD_ESCAPE_RE = re.compile(r"\\([.\-_*`\[\]()#!])")
-
-
-def strip_md_escapes(text: str) -> str:
-    """Unescape common markdown escapes: \\-, 1\\., \\. → literal chars."""
-    if not text:
-        return ""
-    return _MD_ESCAPE_RE.sub(r"\1", text)
 
 
 def paragraphs(text: str) -> list[str]:

@@ -1,9 +1,41 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_MAX_CITY_LEN = 40
+_MAX_MARKETS_SERVED = 30
+_BADGE_JUNK_RE = re.compile(
+    r"packages?\s+starting|starting\s+at\s*\$|\bguests\b|sq\.?\s*feet|\bsq\s*ft\b",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_phone_value(tel: object) -> str | None:
+    if tel is None:
+        return None
+    raw = str(tel).strip()
+    if not raw:
+        return None
+    digits = re.sub(r"\D", "", raw)
+    if not digits or set(digits) <= {"0"}:
+        return None
+    if len(digits) == 11 and digits.startswith("1"):
+        national = digits[1:]
+        keep_plus = True
+    elif len(digits) == 10:
+        national = digits
+        keep_plus = raw.startswith("+")
+    else:
+        return None
+    if national[0] in "01":
+        return None
+    if keep_plus or len(digits) == 11:
+        return f"+1{national}"
+    return national
 
 
 class Review(BaseModel):
@@ -37,6 +69,17 @@ class Location(BaseModel):
     country: Optional[str] = None
     raw_location: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _gate_long_city(self) -> "Location":
+        if self.city is not None and len(self.city) > _MAX_CITY_LEN:
+            if self.raw_location and (
+                self.raw_location == self.city
+                or self.raw_location.startswith(self.city)
+            ):
+                self.raw_location = None
+            self.city = None
+        return self
+
 
 class ServiceArea(BaseModel):
     city: Optional[str] = None
@@ -46,6 +89,12 @@ class ServiceArea(BaseModel):
     travel_radius: Optional[str] = None  # e.g. "100 miles", "1.5 hours"
     can_travel_nationwide: Optional[bool] = None
     can_travel_statewide: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _gate_long_city(self) -> "ServiceArea":
+        if self.city is not None and len(self.city) > _MAX_CITY_LEN:
+            self.city = None
+        return self
 
 
 class MarketServed(BaseModel):
@@ -108,6 +157,15 @@ class Package(BaseModel):
     price: Optional[Price] = None
     prices: list[Price] = Field(default_factory=list)
     offerings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _consolidate_price(self) -> "Package":
+        if self.price is None:
+            return self
+        if not self.prices:
+            self.prices = [self.price]
+        self.price = None
+        return self
 
 
 class Addon(BaseModel):
@@ -243,3 +301,25 @@ class VendorProfile(BaseModel):
     social_media: Optional[list[SocialMediaLink]] = None
     past_events: Optional[list[VendorEvent]] = None
     upcoming_events: Optional[list[VendorEvent]] = None
+
+    @field_validator("phone_number", "secondary_phone_number", mode="before")
+    @classmethod
+    def _gate_phone(cls, value: object) -> str | None:
+        return _sanitize_phone_value(value)
+
+    @field_validator("markets_served", mode="after")
+    @classmethod
+    def _gate_markets_served(
+        cls, value: list[MarketServed] | None
+    ) -> list[MarketServed] | None:
+        if value is not None and len(value) > _MAX_MARKETS_SERVED:
+            return None
+        return value
+
+    @field_validator("verified_badges", mode="after")
+    @classmethod
+    def _gate_verified_badges(cls, value: list[str] | None) -> list[str] | None:
+        if not value:
+            return value
+        kept = [b for b in value if b and not _BADGE_JUNK_RE.search(b)]
+        return kept or None

@@ -334,8 +334,15 @@ class TheBashProfileParser(VendorProfileParser):
         if not state_name and state_code:
             state_name = STATE_CODE_TO_NAME.get(state_code)
 
+        if state_name and state_name.lower() not in US_STATE_NAMES:
+            # Venue-category breadcrumbs (Bars, Restaurants, Castles, …)
+            state_name = None
+
         if not state_code and state_name:
             state_code = US_STATE_NAMES.get(state_name.lower())
+
+        if state_code and not state_name:
+            state_name = STATE_CODE_TO_NAME.get(state_code)
 
         raw_location = None
         if city and state_code:
@@ -490,6 +497,14 @@ class TheBashProfileParser(VendorProfileParser):
             if lower.startswith("avg ") or "verified bookings" in lower:
                 continue
             if lower.startswith("member since") or lower.startswith("starting at"):
+                continue
+            if (
+                "packages starting" in lower
+                or "guests" in lower
+                or "sq feet" in lower
+                or "sq ft" in lower
+                or "sq. feet" in lower
+            ):
                 continue
             badges.append(item)
         return self._none_if_empty(badges)

@@ -5,6 +5,9 @@ from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pymongo import ASCENDING
+from pymongo.errors import DuplicateKeyError
+
+from utils.logger import logger
 
 
 class VendorsExtractedProfilesRepository:
@@ -20,6 +23,11 @@ class VendorsExtractedProfilesRepository:
             unique=True,
             name="page_url_unique",
         )
+        await self._collection.create_index(
+            [("source", ASCENDING), ("slug", ASCENDING)],
+            unique=True,
+            name="source_slug_unique",
+        )
         self._index_ready = True
 
     async def upsert_extracted(
@@ -28,7 +36,8 @@ class VendorsExtractedProfilesRepository:
         page_url: str,
         source: str,
         profile_fields: dict[str, Any],
-    ) -> None:
+    ) -> bool:
+        """Upsert extracted profile. Returns False if duplicate (silent)."""
         await self.ensure_indexes()
         now = datetime.now(timezone.utc)
         doc = {
@@ -37,8 +46,18 @@ class VendorsExtractedProfilesRepository:
             "source": source,
             **profile_fields,
         }
-        await self._collection.update_one(
-            {"page_url": page_url},
-            {"$set": doc},
-            upsert=True,
-        )
+        try:
+            await self._collection.update_one(
+                {"page_url": page_url},
+                {"$set": doc},
+                upsert=True,
+            )
+            return True
+        except DuplicateKeyError:
+            logger.info(
+                "Duplicate extracted profile skipped: page_url=%s source=%s slug=%s",
+                page_url,
+                source,
+                profile_fields.get("slug"),
+            )
+            return False

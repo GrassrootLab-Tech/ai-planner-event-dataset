@@ -19,6 +19,7 @@ from vendor_profiles.parsers.base import VendorProfileParser
 from vendor_profiles.parsers.text import (
     absolute_url,
     clean_or_none,
+    sanitize_phone,
 )
 from vendor_profiles.parsers.us_states import STATE_CODE_TO_NAME, country_for_us_state
 
@@ -312,7 +313,7 @@ class EventectiveProfileParser(VendorProfileParser):
                 chars.append(ch)
             elif ch == "+" and i == 0:
                 chars.append(ch)
-        return "".join(chars) or None
+        return sanitize_phone("".join(chars) or None)
 
     @staticmethod
     def _parse_website(header: str) -> str | None:

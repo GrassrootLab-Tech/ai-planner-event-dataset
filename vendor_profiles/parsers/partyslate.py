@@ -27,6 +27,7 @@ from vendor_profiles.parsers.text import (
     clean_or_none,
     paragraphs,
     parse_money,
+    sanitize_phone,
     section,
     unescape,
 )
@@ -279,7 +280,9 @@ class PartySlateProfileParser(VendorProfileParser):
                 if not out["name"]:
                     out["name"] = clean_or_none(node.get("name"))
                 if not out["phone_number"]:
-                    out["phone_number"] = clean_or_none(node.get("telephone"))
+                    out["phone_number"] = sanitize_phone(
+                        clean_or_none(node.get("telephone"))
+                    )
                 if not out["website"]:
                     website = clean_or_none(node.get("url"))
                     # Prefer the vendor's own site; skip PartySlate page URLs
@@ -291,7 +294,9 @@ class PartySlateProfileParser(VendorProfileParser):
         if not out["phone_number"]:
             phone_m = _HTML_PHONE_RE.search(html)
             if phone_m:
-                out["phone_number"] = clean_or_none(phone_m.group("phone"))
+                out["phone_number"] = sanitize_phone(
+                    clean_or_none(phone_m.group("phone"))
+                )
         if not out["website"]:
             web_m = _HTML_WEBSITE_RE.search(html)
             if web_m:

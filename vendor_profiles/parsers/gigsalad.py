@@ -631,6 +631,8 @@ class GigSaladProfileParser(VendorProfileParser):
             entry = clean_or_none(strip_md_escapes(line.rstrip(" \\")))
             if not entry or entry.lower() in _SENTINELS:
                 continue
+            if self._is_song_list_noise(entry):
+                continue
             if len(entry) > 120:
                 continue
             if is_soft:
@@ -644,6 +646,18 @@ class GigSaladProfileParser(VendorProfileParser):
         if len(soft_lines) < 5:
             return None
         return soft_lines
+
+    @staticmethod
+    def _is_song_list_noise(text: str) -> bool:
+        stripped = text.strip()
+        if stripped in {".", "-", "—"}:
+            return True
+        # Genre / section headers: "SWING / JAZZ / STANDARDS"
+        if "/" in stripped and stripped == stripped.upper() and len(stripped) < 80:
+            return True
+        if stripped.isupper() and len(stripped.split()) <= 6 and len(stripped) > 3:
+            return True
+        return False
 
     def _parse_team(self, body: str) -> list[TeamMember] | None:
         raw = section(body, "Team", level=3)

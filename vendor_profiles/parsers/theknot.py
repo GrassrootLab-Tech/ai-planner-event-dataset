@@ -25,6 +25,7 @@ from vendor_profiles.parsers.text import (
     absolute_url,
     clean_or_none,
     parse_money,
+    sanitize_phone,
     strip_media_variant,
     unescape,
 )
@@ -918,8 +919,8 @@ class TheKnotProfileParser(VendorProfileParser):
         # Prefer visible label if present
         label = clean_or_none(match.group(1))
         if label and re.search(r"\d", label):
-            return label
-        return clean_or_none(raw)
+            return sanitize_phone(label)
+        return sanitize_phone(raw)
 
     def _parse_website(self, body: str) -> str | None:
         for match in _LINK_RE.finditer(body):

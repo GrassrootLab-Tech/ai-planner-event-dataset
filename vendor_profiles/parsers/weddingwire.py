@@ -28,6 +28,7 @@ from vendor_profiles.parsers.text import (
     paragraphs,
     parse_date,
     parse_money,
+    sanitize_phone,
     section,
     strip_tracking_params,
     unescape,
@@ -116,6 +117,25 @@ _NAV_STOPS = frozenset(
         "map",
     }
 )
+_SERVICE_NOISE = frozenset(
+    {
+        "hired",
+        "hired?",
+        "save",
+        "saved",
+        "save saved",
+        "interested in this vendor?",
+        "request pricing",
+        "this vendor has no available photos",
+        "vendors you may like",
+        "### vendors you may like",
+        "see other vendors that are popular with couples right now",
+        "circle message",
+        "start a conversation",
+    }
+)
+_SERVICE_TOTAL_RE = re.compile(r"^\.\.\.\s*\(\d+\s+total\)$", re.IGNORECASE)
+_IMAGE_FILE_RE = re.compile(r"\.(?:jpe?g|png|gif|webp)$", re.IGNORECASE)
 _SERVICE_FAQ_RE = re.compile(
     r"what\s+(?:.+?\s+)?services\s+do\s+you\s+offer",
     re.IGNORECASE,
@@ -124,10 +144,29 @@ _GENRE_FAQ_RE = re.compile(
     r"what\s+music\s+genres\s+do\s+you\s+specialize\s+in",
     re.IGNORECASE,
 )
+# Visit website: <div class="storefront-summary-website">… data-href="…"
+_HTML_WEBSITE_RE = re.compile(
+    r"<div\b(?=[^>]*\bstorefront-summary-website\b)[^>]*>"
+    r".*?data-href=[\"'](?P<url>[^\"']+)[\"']",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class WeddingWireProfileParser(VendorProfileParser):
     source_host = "weddingwire.com"
+
+    @staticmethod
+    def _is_service_noise(text: str) -> bool:
+        lower = text.lower().strip()
+        if lower in _SERVICE_NOISE:
+            return True
+        if lower.startswith("### ") and "vendor" in lower:
+            return True
+        if _SERVICE_TOTAL_RE.match(lower):
+            return True
+        if _IMAGE_FILE_RE.search(lower):
+            return True
+        return False
 
     def parse(
         self,
@@ -148,8 +187,14 @@ class WeddingWireProfileParser(VendorProfileParser):
         portfolio, profile_picture = self._parse_media(body)
         categories, chips = self._parse_categories_and_chips(body)
 
-        services = list(faqs_info.get("services") or [])
+        services = [
+            s
+            for s in (faqs_info.get("services") or [])
+            if not self._is_service_noise(s)
+        ]
         for chip in chips or []:
+            if self._is_service_noise(chip):
+                continue
             if chip.lower() not in {s.lower() for s in services}:
                 services.append(chip)
 
@@ -157,6 +202,7 @@ class WeddingWireProfileParser(VendorProfileParser):
             business_name=business_name,
             slug=self.slug_from_url(page_url),
             phone_number=self._parse_phone(body),
+            website=self._parse_website(html),
             business_type=self._parse_business_type(body),
             tagline=self._parse_tagline(body, business_name),
             profile_picture=profile_picture,
@@ -290,8 +336,8 @@ class WeddingWireProfileParser(VendorProfileParser):
             return None, []
         if not primary:
             return None, chips
-        sub = chips[0] if chips else primary
-        return [Category(primary_category=primary, sub_category=sub)], chips
+        # WeddingWire header chips are UI noise (e.g. "Hired?"); mirror primary.
+        return [Category(primary_category=primary, sub_category=primary)], chips
 
     def _parse_service_chips(self, body: str) -> list[str]:
         """Chips between the nav anchors and the rating summary."""
@@ -329,6 +375,8 @@ class WeddingWireProfileParser(VendorProfileParser):
             if re.fullmatch(r"\d+(?:\.\d+)?", text):
                 continue
             if text.lower() in {"fantastic", "recommended by 100% of couples"}:
+                continue
+            if self._is_service_noise(text):
                 continue
             if len(text) > 60:
                 continue
@@ -643,6 +691,8 @@ class WeddingWireProfileParser(VendorProfileParser):
 
             if _SERVICE_FAQ_RE.search(title):
                 for item in content_parts:
+                    if self._is_service_noise(item):
+                        continue
                     if item not in services:
                         services.append(item)
             elif _GENRE_FAQ_RE.search(title):
@@ -769,27 +819,75 @@ class WeddingWireProfileParser(VendorProfileParser):
     def _parse_map(
         self, body: str
     ) -> tuple[Location | None, ServiceArea | None]:
-        raw = section(body, "Map", level=2)
-        if not raw:
-            # Fallback: city from header `[Denver, CO](#map)`
-            return self._location_from_header(body), None
-
-        location: Location | None = None
-        service_area: ServiceArea | None = None
         travel_radius: str | None = None
         can_nationwide: bool | None = None
+        map_location: Location | None = None
+        map_service_area: ServiceArea | None = None
 
-        travel_m = _TRAVEL_RE.search(raw)
-        if travel_m:
-            radius = clean_or_none(travel_m.group("radius"))
-            if radius:
-                if "no travel restrictions" in radius.lower():
-                    can_nationwide = True
-                    travel_radius = radius
-                else:
-                    travel_radius = radius
+        raw = section(body, "Map", level=2)
+        if raw:
+            travel_m = _TRAVEL_RE.search(raw)
+            if travel_m:
+                radius = clean_or_none(travel_m.group("radius"))
+                if radius:
+                    if "no travel restrictions" in radius.lower():
+                        can_nationwide = True
+                        travel_radius = radius
+                    else:
+                        travel_radius = radius
+            map_location, map_service_area = self._location_from_map_section(
+                raw,
+                travel_radius=travel_radius,
+                can_nationwide=can_nationwide,
+            )
 
-        # Address / location lines
+        # 1) Header `[Denver, CO](#map)`  2) breadcrumb city  3) Map address
+        location = self._location_from_header(body)
+        if location is None:
+            location = self._location_from_breadcrumbs(body)
+        if location is None:
+            location = map_location
+
+        service_area: ServiceArea | None = None
+        if location is not None and map_service_area is not None:
+            # Keep map travel/zip, but city/state follow the preferred location.
+            st_code = None
+            if location.state:
+                st_code = US_STATE_NAMES.get(location.state.lower())
+            service_area = ServiceArea(
+                city=location.city,
+                state=location.state,
+                state_code=st_code or map_service_area.state_code,
+                service_pincode=map_service_area.service_pincode,
+                travel_radius=travel_radius or map_service_area.travel_radius,
+                can_travel_nationwide=(
+                    can_nationwide
+                    if can_nationwide is not None
+                    else map_service_area.can_travel_nationwide
+                ),
+            )
+        elif location is not None:
+            st_code = None
+            if location.state:
+                st_code = US_STATE_NAMES.get(location.state.lower())
+            service_area = ServiceArea(
+                city=location.city,
+                state=location.state,
+                state_code=st_code,
+                travel_radius=travel_radius,
+                can_travel_nationwide=can_nationwide,
+            )
+        return location, service_area
+
+    def _location_from_map_section(
+        self,
+        raw: str,
+        *,
+        travel_radius: str | None,
+        can_nationwide: bool | None,
+    ) -> tuple[Location | None, ServiceArea | None]:
+        location: Location | None = None
+        service_area: ServiceArea | None = None
         for line in raw.splitlines():
             text = unescape(line).strip()
             if not text or text.lower() in {"location", "travel range"}:
@@ -800,7 +898,6 @@ class WeddingWireProfileParser(VendorProfileParser):
                 continue
             addr = _ADDRESS_RE.search(text)
             if not addr:
-                # Try simpler "City, ST"
                 cs = _CITY_STATE_RE.search(text)
                 if cs and location is None:
                     city = clean_or_none(cs.group("city"))
@@ -841,28 +938,39 @@ class WeddingWireProfileParser(VendorProfileParser):
                 can_travel_nationwide=can_nationwide,
             )
             break
-
-        if location is None:
-            location = self._location_from_header(body)
-        if service_area is None and location is not None:
-            st_code = None
-            if location.state:
-                st_code = US_STATE_NAMES.get(location.state.lower())
-            service_area = ServiceArea(
-                city=location.city,
-                state=location.state,
-                state_code=st_code,
-                travel_radius=travel_radius,
-                can_travel_nationwide=can_nationwide,
-            )
-        elif service_area is not None and travel_radius and not service_area.travel_radius:
-            service_area = service_area.model_copy(
-                update={
-                    "travel_radius": travel_radius,
-                    "can_travel_nationwide": can_nationwide,
-                }
-            )
         return location, service_area
+
+    def _location_from_breadcrumbs(self, body: str) -> Location | None:
+        """City = last breadcrumb link (e.g. Dublin before the vendor name)."""
+        crumbs = self._breadcrumb_labels(body)
+        if not crumbs:
+            return None
+        # Second-to-last overall when business name follows; last link crumb is city.
+        city = clean_or_none(crumbs[-1])
+        if not city:
+            return None
+        bare_city = re.sub(r"\s*\([^)]*\)\s*", "", city.lower()).strip()
+        if bare_city in {"weddings", "home"} or bare_city in US_STATE_NAMES:
+            return None
+        if "wedding" in bare_city or "&" in city:
+            return None
+
+        state_name: str | None = None
+        st_code: str | None = None
+        for label in crumbs[:-1]:
+            bare = re.sub(r"\s*\([^)]*\)\s*", "", label.lower()).strip()
+            if bare in US_STATE_NAMES:
+                st_code = US_STATE_NAMES[bare]
+                state_name = STATE_CODE_TO_NAME.get(st_code)
+                break
+
+        raw = f"{city}, {state_name}" if state_name else city
+        return Location(
+            city=city,
+            state=state_name,
+            country=country_for_us_state(state=state_name, state_code=st_code),
+            raw_location=raw,
+        )
 
     def _location_from_header(self, body: str) -> Location | None:
         for match in _LINK_RE.finditer(body):
@@ -885,6 +993,29 @@ class WeddingWireProfileParser(VendorProfileParser):
             )
         return None
 
+    def _parse_website(self, html: str | None) -> str | None:
+        """Vendor site from HTML ``storefront-summary-website`` ``data-href``."""
+        if not html:
+            return None
+        match = _HTML_WEBSITE_RE.search(html)
+        if not match:
+            return None
+        raw = clean_or_none(match.group("url"))
+        if not raw:
+            return None
+        url = absolute_url(raw)
+        if not url:
+            return None
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+        host = parsed.netloc.lower().removeprefix("www.")
+        if host == "weddingwire.com" or host.endswith(".weddingwire.com"):
+            return None
+        if host == "weddingwire.us" or host.endswith(".weddingwire.us"):
+            return None
+        return strip_tracking_params(url)
+
     def _parse_phone(self, body: str) -> str | None:
         match = _TEL_RE.search(body)
         if match:
@@ -900,11 +1031,7 @@ class WeddingWireProfileParser(VendorProfileParser):
 
     @staticmethod
     def _normalize_phone(tel: str) -> str | None:
-        if tel.startswith("+"):
-            digits = "+" + re.sub(r"\D", "", tel[1:])
-        else:
-            digits = re.sub(r"\D", "", tel)
-        return digits or None
+        return sanitize_phone(tel)
 
     # ------------------------------------------------------------------
     # Social / awards / media
