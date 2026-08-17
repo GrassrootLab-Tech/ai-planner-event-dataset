@@ -16,6 +16,7 @@ from vendor_profiles.db.extracted_profiles_repo import (
 from vendor_profiles.db.profiles_repo import (
     EXTRACT_ELIGIBLE_STATUS,
     EXTRACTED_STATUS,
+    EXTRACTION_SKIPPED_STATUS,
     VendorsScrapedProfilesRepository,
 )
 from vendor_profiles.parsers import get_parser_for_url
@@ -72,10 +73,22 @@ class VendorExtractService:
     async def extract_url(self, page_url: str) -> ExtractOutcome:
         # Fragment URLs (#deals, #reviews) are page sections, not vendor profiles.
         if "#" in page_url:
+            reason = "page_url has # fragment; not a vendor profile URL"
+            marked = await self._profiles.mark_extraction_skipped(
+                page_url, reason
+            )
+            if not marked:
+                logger.warning(
+                    "Fragment URL skip but status was not %s for %s "
+                    "(wanted %s)",
+                    EXTRACT_ELIGIBLE_STATUS,
+                    page_url,
+                    EXTRACTION_SKIPPED_STATUS,
+                )
             return ExtractOutcome(
                 page_url=page_url,
                 outcome="skipped",
-                detail="page_url has # fragment; not a vendor profile URL",
+                detail=f"{reason}; marked {EXTRACTION_SKIPPED_STATUS}",
             )
 
         doc = await self._profiles.find_scraped_by_page_url(page_url)

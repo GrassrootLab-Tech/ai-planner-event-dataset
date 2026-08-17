@@ -100,10 +100,47 @@ _REVIEW_BLOCK_RE = re.compile(
 _FAQ_NOISE = frozenset(
     {
         "read all faq",
+        "read more faq",
+        "read more",
         "any other questions?",
         "reach out about anything you didn't see answered here—no question is too small!",
         "message vendor",
     }
+)
+_SERVICE_SECTION_STOPS = frozenset(
+    {
+        "read more",
+        "read more faq",
+        "view all",
+    }
+)
+_MD_LINK_RE = re.compile(r"^\[([^\]]+)\]\([^)]*\)\s*$")
+_HEADING_LINE_RE = re.compile(r"^#+\s+\S")
+
+
+def _services_section_stop(text: str) -> bool:
+    """True when a Services Offered line should end the section."""
+    raw = text.strip()
+    if not raw:
+        return False
+    lower = raw.lower()
+    if lower in _SERVICE_SECTION_STOPS:
+        return True
+    if _HEADING_LINE_RE.match(raw):
+        return True
+    link = _MD_LINK_RE.match(raw)
+    if link and link.group(1).strip().lower() in _SERVICE_SECTION_STOPS:
+        return True
+    return False
+
+
+_SERVICES_OFFERED_RE = re.compile(
+    r"^(?:\*\*Services Offered\*\*|#{1,6}\s+Services Offered)\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_FAQ_SECTION_RE = re.compile(
+    r"^(?:\*\*(?:Frequently asked questions|FAQ)\*\*|#{1,6}\s+(?:Frequently asked questions|FAQ))\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 _NAV_STOPS = frozenset(
     {
@@ -137,7 +174,7 @@ _SERVICE_NOISE = frozenset(
 _SERVICE_TOTAL_RE = re.compile(r"^\.\.\.\s*\(\d+\s+total\)$", re.IGNORECASE)
 _IMAGE_FILE_RE = re.compile(r"\.(?:jpe?g|png|gif|webp)$", re.IGNORECASE)
 _SERVICE_FAQ_RE = re.compile(
-    r"what\s+(?:.+?\s+)?services\s+do\s+you\s+offer",
+    r"what\s+(?:.+?\s+)?services\s+do\s+you\s+(?:offer|provide)",
     re.IGNORECASE,
 )
 _GENRE_FAQ_RE = re.compile(
@@ -159,6 +196,8 @@ class WeddingWireProfileParser(VendorProfileParser):
     def _is_service_noise(text: str) -> bool:
         lower = text.lower().strip()
         if lower in _SERVICE_NOISE:
+            return True
+        if _services_section_stop(text):
             return True
         if lower.startswith("### ") and "vendor" in lower:
             return True
@@ -187,16 +226,33 @@ class WeddingWireProfileParser(VendorProfileParser):
         portfolio, profile_picture = self._parse_media(body)
         categories, chips = self._parse_categories_and_chips(body)
 
-        services = [
-            s
-            for s in (faqs_info.get("services") or [])
-            if not self._is_service_noise(s)
-        ]
+        services: list[str] = []
+        seen_services: set[str] = set()
+
+        def _add_service(text: str) -> None:
+            cleaned = clean_or_none(text)
+            if not cleaned or self._is_service_noise(cleaned):
+                return
+            if _services_section_stop(cleaned):
+                return
+            key = cleaned.lower()
+            if key in seen_services:
+                return
+            seen_services.add(key)
+            services.append(cleaned)
+
+        for item in self._parse_services_offered(body):
+            if _services_section_stop(item):
+                break
+            _add_service(item)
+        for item in faqs_info.get("services") or []:
+            _add_service(item)
         for chip in chips or []:
-            if self._is_service_noise(chip):
-                continue
-            if chip.lower() not in {s.lower() for s in services}:
-                services.append(chip)
+            _add_service(chip)
+
+        # Cap noisy long lists: keep top 15 when more than 25 items.
+        if len(services) > 25:
+            services = services[:15]
 
         return VendorProfile(
             business_name=business_name,
@@ -204,7 +260,7 @@ class WeddingWireProfileParser(VendorProfileParser):
             phone_number=self._parse_phone(body),
             website=self._parse_website(html),
             business_type=self._parse_business_type(body),
-            tagline=self._parse_tagline(body, business_name),
+            tagline=None,
             profile_picture=profile_picture,
             categories=categories,
             description=about.get("description"),
@@ -286,30 +342,6 @@ class WeddingWireProfileParser(VendorProfileParser):
             if self._looks_like_geo_crumb(label):
                 continue
             return label
-        return None
-
-    def _parse_tagline(self, body: str, business_name: str) -> str | None:
-        h1 = _H1_RE.search(body)
-        if not h1:
-            return None
-        # Look in the ~15 non-empty lines before the H1
-        before = body[: h1.start()]
-        lines = [unescape(ln).strip() for ln in before.splitlines()]
-        lines = [ln for ln in lines if ln]
-        # Prefer "<category> in <city>" style line
-        for line in reversed(lines[-20:]):
-            if line.startswith("[") or line.startswith("!") or line.startswith("-"):
-                continue
-            if line.lower() in {"hired?", "hired", "save saved"}:
-                continue
-            if _AWARD_WINNER_RE.search(line):
-                continue
-            if re.fullmatch(r"\d{4}", line):
-                continue
-            if line == business_name:
-                continue
-            if " in " in line.lower() and len(line) < 80:
-                return clean_or_none(line)
         return None
 
     def _parse_rating(self, body: str) -> float | None:
@@ -656,12 +688,80 @@ class WeddingWireProfileParser(VendorProfileParser):
         result["price_range"] = PriceRange(min_price=money[0])
 
     # ------------------------------------------------------------------
+    # Services Offered
+    # ------------------------------------------------------------------
+
+    def _parse_services_offered(self, body: str) -> list[str]:
+        """Paras + bullets under Services Offered until View all/Read more/heading."""
+        start_m = _SERVICES_OFFERED_RE.search(body)
+        if not start_m:
+            return []
+        start = start_m.end()
+        end_m = re.search(
+            r"(?im)^(?:read more(?:\s+faq)?\s*$|view all\s*$|"
+            r"\[[^\]]*view all[^\]]*\]\([^)]*\)\s*$|"
+            r"#{1,6}\s+\S)",
+            body[start:],
+        )
+        end = start + end_m.start() if end_m else len(body)
+        raw = body[start:end]
+
+        items: list[str] = []
+        para_lines: list[str] = []
+
+        def flush_para() -> None:
+            nonlocal para_lines
+            if not para_lines:
+                return
+            para = clean_or_none(" ".join(para_lines))
+            para_lines = []
+            if para and not _services_section_stop(para):
+                items.append(para)
+
+        for line in raw.splitlines():
+            text = unescape(line).strip()
+            if not text:
+                flush_para()
+                continue
+            if _services_section_stop(text):
+                flush_para()
+                break
+            if text.startswith("!"):
+                continue
+            if text.startswith("- "):
+                flush_para()
+                bullet = clean_or_none(text[2:].strip())
+                if bullet and _services_section_stop(bullet):
+                    break
+                if bullet:
+                    items.append(bullet)
+                continue
+            # Skip non-stop markdown links (images already handled via !)
+            if text.startswith("[") and "](" in text:
+                continue
+            para_lines.append(text)
+
+        flush_para()
+        return items
+
+    # ------------------------------------------------------------------
     # FAQ
     # ------------------------------------------------------------------
 
     def _parse_faqs(self, body: str) -> dict:
         result: dict = {"faqs": None, "services": None, "genres": None}
-        raw = section(body, "FAQ", level=2)
+        start_m = _FAQ_SECTION_RE.search(body)
+        if not start_m:
+            raw = section(body, "FAQ", level=2)
+        else:
+            start = start_m.end()
+            # Close on Read more / Read more FAQ, or # / ## (not ### questions)
+            nxt = re.search(
+                r"(?im)^(?:read more(?:\s+faq)?\s*$|#{1,2}\s+\S)",
+                body[start:],
+            )
+            end = start + nxt.start() if nxt else len(body)
+            raw = body[start:end].strip()
         if not raw:
             return result
 
@@ -678,13 +778,23 @@ class WeddingWireProfileParser(VendorProfileParser):
             title = clean_or_none(lines[0])
             if not title:
                 continue
+            if title.lower() in _FAQ_NOISE or title.lower().startswith("read more"):
+                break
             content_parts: list[str] = []
+            stop_section = False
             for ln in lines[1:]:
-                if ln.lower() in _FAQ_NOISE:
-                    continue
-                content_parts.append(ln)
+                lower = ln.lower()
+                if lower in _FAQ_NOISE or lower.startswith("read more"):
+                    stop_section = True
+                    break
+                if ln.startswith("#"):
+                    stop_section = True
+                    break
+                cleaned_ln = ln[2:].strip() if ln.startswith("- ") else ln
+                if cleaned_ln:
+                    content_parts.append(cleaned_ln)
             content = (
-                clean_or_none("\n".join(content_parts)) if content_parts else None
+                clean_or_none(", ".join(content_parts)) if content_parts else None
             )
             faqs.append(FAQ(title=title, content=content, order=order))
             order += 1
@@ -699,6 +809,9 @@ class WeddingWireProfileParser(VendorProfileParser):
                 for item in content_parts:
                     if item not in genres:
                         genres.append(item)
+
+            if stop_section:
+                break
 
         result["faqs"] = self._none_if_empty(faqs)
         result["services"] = self._none_if_empty(services)

@@ -2,7 +2,8 @@
 
 Loads up to --batch-size (default 100) status=scraped profiles at a time,
 extracts them (rules or Haiku), upserts into vendors_extracted_profiles, then
-marks scraped → extracted / failed. With --all, repeats until none remain.
+marks scraped → extracted / extraction_skipped / failed. With --all, repeats
+until none remain.
 
 Uses a single Mongo connection for the whole run (indexes ensured once).
 

@@ -13,6 +13,7 @@ SCRAPE_ELIGIBLE_STATUSES = ("staged", "failed")
 EXTRACT_ELIGIBLE_STATUS = "scraped"
 EXTRACTED_STATUS = "extracted"
 EXTRACTION_FAILED_STATUS = "extraction_failed"
+EXTRACTION_SKIPPED_STATUS = "extraction_skipped"
 
 
 def _scrape_host_exclusion_query() -> dict | None:
@@ -204,6 +205,19 @@ class VendorsScrapedProfilesRepository:
             {"page_url": page_url},
             {"$set": {"status": EXTRACTION_FAILED_STATUS, "error": error}},
         )
+
+    async def mark_extraction_skipped(self, page_url: str, reason: str) -> bool:
+        """Transition scraped → extraction_skipped. Returns False if not currently scraped."""
+        result = await self._collection.update_one(
+            {"page_url": page_url, "status": EXTRACT_ELIGIBLE_STATUS},
+            {
+                "$set": {
+                    "status": EXTRACTION_SKIPPED_STATUS,
+                    "error": reason,
+                }
+            },
+        )
+        return result.modified_count == 1
 
     async def find_scraped_by_page_url(self, page_url: str) -> dict | None:
         return await self._collection.find_one(
