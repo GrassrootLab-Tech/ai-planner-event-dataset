@@ -224,8 +224,9 @@ class WeddingWireProfileParser(VendorProfileParser):
         faqs_info = self._parse_faqs(body)
         location, service_area = self._parse_map(body)
         portfolio, profile_picture = self._parse_media(body)
-        categories, chips = self._parse_categories_and_chips(body)
+        categories, _chips = self._parse_categories_and_chips(body)
 
+        # Only fill services_provided from an explicit Services Offered section.
         services: list[str] = []
         seen_services: set[str] = set()
 
@@ -245,10 +246,6 @@ class WeddingWireProfileParser(VendorProfileParser):
             if _services_section_stop(item):
                 break
             _add_service(item)
-        for item in faqs_info.get("services") or []:
-            _add_service(item)
-        for chip in chips or []:
-            _add_service(chip)
 
         # Cap noisy long lists: keep top 15 when more than 25 items.
         if len(services) > 25:
