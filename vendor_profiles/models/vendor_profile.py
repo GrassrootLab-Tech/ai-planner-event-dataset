@@ -151,6 +151,11 @@ class SocialMediaLink(BaseModel):
     platform_url: str
 
 
+class OtherLink(BaseModel):
+    type: Literal["other"] = "other"
+    url: str
+
+
 class Package(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -269,6 +274,7 @@ class VendorProfile(BaseModel):
     setup_time: Optional[Union[int, str]] = None  # in hours
     breakdown_time: Optional[Union[int, str]] = None  # in hours
     has_event_space: Optional[bool] = None
+    venue_capacity: Optional[int] = None
     emergency_booking: Optional[bool] = None
     weekly_hours: Optional[WeeklyHours] = None
     setup_requirements: Optional[list[SetupRequirement]] = None
@@ -299,6 +305,7 @@ class VendorProfile(BaseModel):
     awards: Optional[list[str]] = None
     similar_vendors: Optional[list[str]] = None
     social_media: Optional[list[SocialMediaLink]] = None
+    other_links: Optional[list[OtherLink]] = None
     past_events: Optional[list[VendorEvent]] = None
     upcoming_events: Optional[list[VendorEvent]] = None
 

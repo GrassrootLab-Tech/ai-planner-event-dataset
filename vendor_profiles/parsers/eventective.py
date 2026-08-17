@@ -7,6 +7,7 @@ from vendor_profiles.models.vendor_profile import (
     Category,
     Highlight,
     Location,
+    OtherLink,
     Package,
     PortfolioFile,
     Price,
@@ -30,7 +31,33 @@ _BREADCRUMB_RE = re.compile(
     re.MULTILINE,
 )
 _HEADER_PRICE_RE = re.compile(
-    r"\$(?P<min>[\d,]+(?:\.\d+)?)\s*-\s*\$(?P<max>[\d,]+(?:\.\d+)?)\s*/\s*event",
+    r"\$(?P<min>[\d,]+(?:\.\d+)?)\s*(?:-|to)\s*\$(?P<max>[\d,]+(?:\.\d+)?)"
+    r"(?:\s*/\s*event|\s+for\s+(?P<guests>\d+)\s+guests?)?",
+    re.IGNORECASE,
+)
+_HEADER_CAPACITY_RE = re.compile(
+    r"^(?P<n>\d+)\s+Capacity\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_MAX_PEOPLE_RE = re.compile(
+    r"Max Number of People for an Event:\s*(?P<n>\d+)",
+    re.IGNORECASE,
+)
+_AMENITIES_RE = re.compile(
+    r"\*\*Amenities\*\*\s*\n+(?P<body>.*?)(?=\n## |\n\*\*|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+_FEATURES_BLOCK_RE = re.compile(
+    r"\*\*Features\*\*\s*\n+(?P<body>.*?)(?=\n## |\n\*\*|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+_PKG_PRICE_RANGE_RE = re.compile(
+    r"\$(?P<min>[\d,]+(?:\.\d+)?)\s*-\s*\$(?P<max>[\d,]+(?:\.\d+)?)"
+    r"(?:\s+per\s+(?P<per>event|person))?",
+    re.IGNORECASE,
+)
+_PKG_PRICE_SINGLE_RE = re.compile(
+    r"\$(?P<amt>[\d,]+(?:\.\d+)?)(?:\s+per\s+(?P<per>event|person))?",
     re.IGNORECASE,
 )
 _ADDRESS_RE = re.compile(
@@ -57,24 +84,10 @@ _PACKAGE_BLOCK_RE = re.compile(
     r"(?P<price>\$[^\n]+)",
     re.MULTILINE | re.IGNORECASE,
 )
-_PKG_PRICE_RANGE_RE = re.compile(
-    r"\$(?P<min>[\d,]+(?:\.\d+)?)\s*-\s*\$(?P<max>[\d,]+(?:\.\d+)?)"
-    r"(?:\s+per\s+event)?",
-    re.IGNORECASE,
-)
-_PKG_PRICE_SINGLE_RE = re.compile(
-    r"\$(?P<amt>[\d,]+(?:\.\d+)?)(?:\s+per\s+event)?",
-    re.IGNORECASE,
-)
 _REC_RE = re.compile(
     r"\*\*(?P<title>.+?)\*\*\s*—\s*(?P<who>[^\n]+)\s*\n+"
     r"(?P<body>.*?)(?=\n\*\*|\n\d+\.\s+\[Write A Recommendation|\n## |\Z)",
     re.DOTALL,
-)
-_FEATURES_RE = re.compile(
-    r"\*\*Features\*\*\s*\n+"
-    r"(?:-\s+)?(?:Special Features:\s*)?(?P<body>.+?)(?=\n## |\n\*\*|\Z)",
-    re.DOTALL | re.IGNORECASE,
 )
 _DESC_NOISE = frozenset(
     {
@@ -127,7 +140,12 @@ class EventectiveProfileParser(VendorProfileParser):
 
         price_range, prices = self._parse_header_price(header)
         packages = self._parse_pricing(body)
+        if price_range is None and prices is None:
+            price_range, prices = self._prices_from_packages(packages)
         portfolio, profile_picture = self._parse_media(body)
+        reasons, services, venue_capacity = self._parse_additional_info(body)
+        if venue_capacity is None:
+            venue_capacity = self._parse_header_capacity(header)
 
         return VendorProfile(
             business_name=business_name,
@@ -138,13 +156,16 @@ class EventectiveProfileParser(VendorProfileParser):
             profile_picture=profile_picture,
             categories=categories,
             description=self._parse_description(header),
-            reasons_to_book_me=self._parse_additional_info(body),
+            services_provided=services,
+            reasons_to_book_me=reasons,
             location=self._parse_location(header),
+            venue_capacity=venue_capacity,
             prices=prices,
             price_range=price_range,
             packages=packages,
             reviews=self._parse_recommendations(body),
             social_media=self._parse_social(body),
+            other_links=self._parse_other_links(header),
             portfolio_files=portfolio,
         )
 
@@ -263,15 +284,39 @@ class EventectiveProfileParser(VendorProfileParser):
         max_amt = self._amount(match.group("max"))
         if min_amt is None:
             return None, None
+        guests = match.groupdict().get("guests")
+        per = f"{guests} guests" if guests else "event"
         price_range = PriceRange(min_price=min_amt, max_price=max_amt)
-        prices = [Price(amount=min_amt, per="event")]
+        prices = [Price(amount=min_amt, per=per)]
+        if max_amt is not None and max_amt != min_amt:
+            prices.append(Price(amount=max_amt, per=per))
         return price_range, prices
 
-    def _parse_description(self, header: str) -> str | None:
-        price = _HEADER_PRICE_RE.search(header)
-        if not price:
+    @staticmethod
+    def _parse_header_capacity(header: str) -> int | None:
+        match = _HEADER_CAPACITY_RE.search(header)
+        if not match:
             return None
-        rest = header[price.end() :]
+        try:
+            return int(match.group("n"))
+        except ValueError:
+            return None
+
+    def _parse_description(self, header: str) -> str | None:
+        # Prefer text after the header price line; else after capacity / address.
+        start = 0
+        price = _HEADER_PRICE_RE.search(header)
+        if price:
+            start = price.end()
+        else:
+            cap = _HEADER_CAPACITY_RE.search(header)
+            if cap:
+                start = cap.end()
+            else:
+                addr = _ADDRESS_RE.search(header)
+                if addr:
+                    start = addr.end()
+        rest = header[start:]
         lines: list[str] = []
         for line in rest.splitlines():
             stripped = line.strip()
@@ -291,6 +336,10 @@ class EventectiveProfileParser(VendorProfileParser):
             if any(lower.startswith(n) for n in _DESC_NOISE):
                 continue
             if lower.startswith("view photos"):
+                continue
+            if _HEADER_CAPACITY_RE.match(stripped):
+                continue
+            if _HEADER_PRICE_RE.search(stripped):
                 continue
             lines.append(stripped)
         if not lines:
@@ -355,24 +404,25 @@ class EventectiveProfileParser(VendorProfileParser):
             offerings = [capacity] if capacity else []
 
             range_match = _PKG_PRICE_RANGE_RE.search(price_line)
-            single = None
             prices: list[Price] = []
             main: Price | None = None
 
             if range_match and "-" in price_line:
                 min_amt = self._amount(range_match.group("min"))
                 max_amt = self._amount(range_match.group("max"))
+                per = (range_match.group("per") or "event").lower()
                 if min_amt is not None:
-                    main = Price(amount=min_amt, per="event")
+                    main = Price(amount=min_amt, per=per)
                     prices.append(main)
                     if max_amt is not None and max_amt != min_amt:
-                        prices.append(Price(amount=max_amt, per="event"))
+                        prices.append(Price(amount=max_amt, per=per))
             else:
                 single = _PKG_PRICE_SINGLE_RE.search(price_line)
                 if single:
                     amt = self._amount(single.group("amt"))
+                    per = (single.group("per") or "event").lower()
                     if amt is not None:
-                        main = Price(amount=amt, per="event")
+                        main = Price(amount=amt, per=per)
 
             packages.append(
                 Package(
@@ -383,6 +433,30 @@ class EventectiveProfileParser(VendorProfileParser):
                 )
             )
         return self._none_if_empty(packages)
+
+    def _prices_from_packages(
+        self, packages: list[Package] | None
+    ) -> tuple[PriceRange | None, list[Price] | None]:
+        if not packages:
+            return None, None
+        amounts: list[float] = []
+        per = "event"
+        for pkg in packages:
+            for p in pkg.prices or ([] if pkg.price is None else [pkg.price]):
+                if p.amount is None:
+                    continue
+                amounts.append(float(p.amount))
+                if p.per:
+                    per = p.per
+        if not amounts:
+            return None, None
+        min_amt = min(amounts)
+        max_amt = max(amounts)
+        price_range = PriceRange(min_price=min_amt, max_price=max_amt)
+        prices = [Price(amount=min_amt, per=per)]
+        if max_amt != min_amt:
+            prices.append(Price(amount=max_amt, per=per))
+        return price_range, prices
 
     # ------------------------------------------------------------------
     # Recommendations / additional info
@@ -424,26 +498,76 @@ class EventectiveProfileParser(VendorProfileParser):
             )
         return self._none_if_empty(reviews)
 
-    def _parse_additional_info(self, body: str) -> list[Highlight] | None:
+    def _parse_additional_info(
+        self, body: str
+    ) -> tuple[list[Highlight] | None, list[str] | None, int | None]:
         section_match = re.search(
             r"^##\s+Additional Info\s*$",
             body,
             re.MULTILINE | re.IGNORECASE,
         )
         if not section_match:
-            return None
+            return None, None, None
         start = section_match.end()
         next_h = re.search(r"^##\s+", body[start:], re.MULTILINE)
         end = start + next_h.start() if next_h else len(body)
         chunk = body[start:end]
 
-        features = _FEATURES_RE.search(chunk)
-        if not features:
+        reasons = self._parse_features_highlights(chunk)
+        services = self._parse_amenities(chunk)
+        venue_capacity = None
+        max_people = _MAX_PEOPLE_RE.search(chunk)
+        if max_people:
+            try:
+                venue_capacity = int(max_people.group("n"))
+            except ValueError:
+                venue_capacity = None
+        return reasons, services, venue_capacity
+
+    def _parse_amenities(self, chunk: str) -> list[str] | None:
+        match = _AMENITIES_RE.search(chunk)
+        if not match:
             return None
-        text = clean_or_none(features.group("body"))
-        if not text:
+        items: list[str] = []
+        for line in match.group("body").splitlines():
+            text = line.strip()
+            if text.startswith("- "):
+                text = text[2:].strip()
+            text = clean_or_none(text)
+            if text:
+                items.append(text)
+        return self._none_if_empty(items)
+
+    def _parse_features_highlights(self, chunk: str) -> list[Highlight] | None:
+        match = _FEATURES_BLOCK_RE.search(chunk)
+        if not match:
             return None
-        return [Highlight(reason_description=text)]
+        highlights: list[Highlight] = []
+        for line in match.group("body").splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            if text.startswith("- "):
+                text = text[2:].strip()
+            if not text:
+                continue
+            # "Special Features: A, B - C" → split on " - " into separate highlights
+            if re.match(r"^Special Features:\s*", text, re.IGNORECASE):
+                rest = re.sub(
+                    r"^Special Features:\s*", "", text, flags=re.IGNORECASE
+                ).strip()
+                parts = [p.strip() for p in re.split(r"\s+-\s+", rest) if p.strip()]
+                if len(parts) <= 1 and "," in rest:
+                    parts = [p.strip() for p in rest.split(",") if p.strip()]
+                for part in parts or ([rest] if rest else []):
+                    cleaned = clean_or_none(part)
+                    if cleaned:
+                        highlights.append(Highlight(reason_description=cleaned))
+                continue
+            cleaned = clean_or_none(text)
+            if cleaned:
+                highlights.append(Highlight(reason_description=cleaned))
+        return self._none_if_empty(highlights)
 
     # ------------------------------------------------------------------
     # Social / media
@@ -492,6 +616,48 @@ class EventectiveProfileParser(VendorProfileParser):
             links.append(
                 SocialMediaLink(platform_type=platform, platform_url=url)
             )
+        return self._none_if_empty(links)
+
+    def _parse_other_links(self, header: str) -> list[OtherLink] | None:
+        """Empty-label header links that aren't website/social (e.g. menus/PDFs)."""
+        website = self._parse_website(header)
+        links: list[OtherLink] = []
+        seen: set[str] = set()
+        if website:
+            seen.add(website.rstrip("/"))
+        for match in _LINK_RE.finditer(header):
+            label = (match.group("label") or "").strip()
+            if label:
+                continue
+            url = absolute_url(match.group("url").strip())
+            if not url:
+                continue
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                continue
+            host = parsed.netloc.lower().removeprefix("www.")
+            if "eventective.com" in host:
+                continue
+            # Known socials stay in social_media
+            if any(
+                s in host
+                for s in (
+                    "instagram.com",
+                    "facebook.com",
+                    "tiktok.com",
+                    "pinterest.com",
+                    "twitter.com",
+                    "youtube.com",
+                    "youtu.be",
+                    "linkedin.com",
+                )
+            ) or host == "x.com" or host.endswith(".x.com"):
+                continue
+            key = url.rstrip("/")
+            if key in seen:
+                continue
+            seen.add(key)
+            links.append(OtherLink(type="other", url=url))
         return self._none_if_empty(links)
 
     def _parse_media(
