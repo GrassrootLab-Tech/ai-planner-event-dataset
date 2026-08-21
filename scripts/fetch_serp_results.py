@@ -33,7 +33,7 @@ DATAFORSEO_TASK_GET_URL = (
 )
 LOCATION_CODE_US = 2840
 LANGUAGE_CODE = "en"
-DEPTH = 100
+DEPTH = 10
 # 1 = standard/normal priority (~5 min). Do not use 2 (high priority).
 PRIORITY_STANDARD = 1
 DEFAULT_WORKERS = 4
@@ -76,19 +76,22 @@ def find_source_by_url(
     return None
 
 
-def _serp_payload(query: str) -> list[dict[str, Any]]:
+def _serp_payload(query: str, *, depth: int | None = None) -> list[dict[str, Any]]:
     return [
         {
             "keyword": query,
             "location_code": LOCATION_CODE_US,
             "language_code": LANGUAGE_CODE,
-            "depth": DEPTH,
+            "depth": depth if depth is not None else DEPTH,
             "priority": PRIORITY_STANDARD,
         }
     ]
 
 
-def parse_organic_items(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+def parse_organic_items(
+    items: list[dict[str, Any]] | None, *, depth: int | None = None
+) -> list[dict[str, Any]]:
+    limit = depth if depth is not None else DEPTH
     organic: list[dict[str, Any]] = []
     for item in items or []:
         if item.get("type") != "organic":
@@ -101,16 +104,18 @@ def parse_organic_items(items: list[dict[str, Any]] | None) -> list[dict[str, An
                 "description": item.get("description"),
             }
         )
-        if len(organic) >= DEPTH:
+        if len(organic) >= limit:
             break
     return organic
 
 
-def parse_organic_from_task(task: dict[str, Any]) -> list[dict[str, Any]]:
+def parse_organic_from_task(
+    task: dict[str, Any], *, depth: int | None = None
+) -> list[dict[str, Any]]:
     results = task.get("result") or []
     if not results:
         return []
-    return parse_organic_items(results[0].get("items"))
+    return parse_organic_items(results[0].get("items"), depth=depth)
 
 
 def fetch_serp_live(login: str, password: str, query: str) -> list[dict[str, Any]]:
@@ -155,12 +160,14 @@ def fetch_serp_live(login: str, password: str, query: str) -> list[dict[str, Any
     return parse_organic_from_task(task)
 
 
-def queue_serp_task(login: str, password: str, query: str) -> str:
+def queue_serp_task(
+    login: str, password: str, query: str, *, depth: int | None = None
+) -> str:
     """Post to standard queue (priority=1). Returns DataForSEO task id."""
     with httpx.Client(timeout=60.0) as client:
         response = client.post(
             DATAFORSEO_TASK_POST_URL,
-            json=_serp_payload(query),
+            json=_serp_payload(query, depth=depth),
             auth=(login, password),
             headers={"Content-Type": "application/json"},
         )
@@ -190,7 +197,7 @@ def queue_serp_task(login: str, password: str, query: str) -> str:
 
 
 def get_serp_task(
-    login: str, password: str, task_id: str
+    login: str, password: str, task_id: str, *, depth: int | None = None
 ) -> tuple[str, list[dict[str, Any]], str]:
     """Fetch a queued task result.
 
@@ -233,7 +240,7 @@ def get_serp_task(
             [],
             f"DataForSEO task error: {task_status} {task.get('status_message')}",
         )
-    return "ok", parse_organic_from_task(task), ""
+    return "ok", parse_organic_from_task(task, depth=depth), ""
 
 
 def should_skip(collection: Collection, search_query: str) -> bool:

@@ -26,6 +26,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 from fetch_serp_results import (  # noqa: E402
     DATAFORSEO_TASK_POST_URL,
     DEFAULT_WORKERS,
+    DEPTH,
     LANGUAGE_CODE,
     LOCATION_CODE_US,
     PRIORITY_STANDARD,
@@ -38,7 +39,6 @@ from vendor_profiles.source_rules import (  # noqa: E402
 )
 from vendor_profiles.sources import CATEGORIES, CITIES, SOURCES  # noqa: E402
 
-DEPTH = 10
 DEFAULT_CITY_END = 5
 DEFAULT_CATEGORY_END = 5
 

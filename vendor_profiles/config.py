@@ -15,6 +15,7 @@ class VendorSettings(BaseSettings):
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db_name: str = "research"
     vendor_data_serp_results_collection: str = "vendor_data_serp_results"
+    the_knot_pricing_pdfs_collection: str = "the_knot_pricing_pdfs"
     vendors_scraped_profiles_collection: str = "vendors_scraped_profiles"
     vendors_scraped_directory_urls_collection: str = "vendors_scraped_directory_urls"
     vendors_extracted_profiles_collection: str = "vendors_extracted_profiles"

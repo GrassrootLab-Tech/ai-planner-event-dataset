@@ -1,4 +1,4 @@
-"""One-shot poll of queued vendor-profile DataForSEO SERP tasks."""
+"""Poll queued The Knot pricing PDF SERP tasks from the_knot_pricing_pdfs."""
 
 from __future__ import annotations
 
@@ -16,11 +16,13 @@ SCRIPTS_ROOT = ROOT / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from fetch_serp_results import DEFAULT_WORKERS, DEPTH, get_serp_task  # noqa: E402
+from fetch_serp_results import DEFAULT_WORKERS, get_serp_task  # noqa: E402
 from vendor_profiles.config import VendorSettings  # noqa: E402
 
+DEFAULT_THEKNOT_DEPTH = 300
 
-def run_poll_serp(*, workers: int = DEFAULT_WORKERS) -> None:
+
+def run_poll_theknot_api_serp(*, workers: int = DEFAULT_WORKERS) -> None:
     if workers < 1:
         raise SystemExit("--workers must be >= 1")
 
@@ -32,12 +34,15 @@ def run_poll_serp(*, workers: int = DEFAULT_WORKERS) -> None:
 
     client = MongoClient(settings.mongo_uri)
     collection = client[settings.mongo_db_name][
-        settings.vendor_data_serp_results_collection
+        settings.the_knot_pricing_pdfs_collection
     ]
 
     queued = list(collection.find({"status": "queued"}))
     total = len(queued)
-    print(f"Queued docs: {total} | workers={workers}")
+    print(
+        f"Collection: {settings.the_knot_pricing_pdfs_collection} | "
+        f"queued docs: {total} | workers={workers}"
+    )
 
     if total == 0:
         client.close()
@@ -61,15 +66,19 @@ def run_poll_serp(*, workers: int = DEFAULT_WORKERS) -> None:
             )
             return label, "failed", 0, "missing task_id"
 
+        doc_depth = doc.get("depth")
+        depth = int(doc_depth) if isinstance(doc_depth, int) else DEFAULT_THEKNOT_DEPTH
+
         outcome, results, error_msg = get_serp_task(
             settings.dataforseo_login,
             settings.dataforseo_password,
             str(task_id),
+            depth=depth,
         )
         if outcome == "pending":
             return label, "pending", 0, ""
         if outcome == "ok":
-            capped = results[:DEPTH]
+            capped = results[:depth]
             collection.update_one(
                 {"_id": doc["_id"]},
                 {
@@ -96,7 +105,7 @@ def run_poll_serp(*, workers: int = DEFAULT_WORKERS) -> None:
         for future in as_completed(futures):
             done += 1
             doc = futures[future]
-            label = doc.get("source_url") or doc.get("search_query") or "?"
+            label = doc.get("search_query") or doc.get("source_url") or "?"
             try:
                 label, status, got, error_msg = future.result()
                 if status == "pending":
@@ -113,7 +122,9 @@ def run_poll_serp(*, workers: int = DEFAULT_WORKERS) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Poll vendor SERP tasks")
+    parser = argparse.ArgumentParser(
+        description="Poll The Knot pricing PDF SERP tasks"
+    )
     parser.add_argument(
         "--workers",
         type=int,
@@ -121,7 +132,7 @@ def main() -> None:
         help=f"Thread pool size (default: {DEFAULT_WORKERS})",
     )
     args = parser.parse_args()
-    run_poll_serp(workers=args.workers)
+    run_poll_theknot_api_serp(workers=args.workers)
 
 
 if __name__ == "__main__":
